@@ -1,0 +1,90 @@
+{
+  "document_type_name": "string",
+  "document_type_code": "string",
+  "id": "string",
+  "buyer_reference": "string",
+  "project_reference": "string",
+  "contract_reference": "string",
+  "issue_date": "YYYY-MM-DD",
+  "due_date": "YYYY-MM-DD",
+  "note": "string",
+  "additional_document_reference": "string",
+  "document_summary": "string",
+  "accounting_supplier_party": {
+    "name": "string",
+    "street_name": "string",
+    "postal_zone": "string",
+    "city_name": "string",
+    "country_code": "string",
+    "vat_id": "string",
+    "tax_registration_id": "string",
+    "company_registration_id": "string",
+    "electronic_mail": "string",
+    "telephone": "string"
+  },
+  "accounting_customer_party": {
+    "name": "string",
+    "street_name": "string",
+    "postal_zone": "string",
+    "city_name": "string",
+    "country_code": "string",
+    "vat_id": "string",
+    "tax_registration_id": "string",
+    "company_registration_id": "string",
+    "electronic_mail": "string",
+    "telephone": "string"
+  },
+  "invoice_lines": [
+    {
+      "id": "string",
+      "item_name": "string",
+      "description": "string",
+      "invoiced_quantity": "number",
+      "unit_code": "string",
+      "standard_item_identification": "string",
+      "sellers_item_identification": "string",
+      "buyers_item_identification": "string",
+      "order_line_reference": "string",
+      "project_reference_line": "string",
+      "price": {
+        "item_net_price": "number",
+        "base_quantity": "number",
+        "base_quantity_unit_code": "string"
+      },
+      "allowance_charge_amount": "number",
+      "line_extension_amount": "number",
+      "total_amount": "number",
+      "classified_tax_category": {
+        "id": "string",
+        "percent": "number",
+        "tax_scheme_id": "string"
+      },
+      "vat_amount": "number"
+    }
+  ],
+  "legal_monetary_total": {
+    "line_extension_amount": "number",
+    "allowance_total_amount": "number",
+    "tax_exclusive_amount": "number",
+    "tax_inclusive_amount": "number",
+    "prepaid_amount": "number",
+    "payable_amount": "number",
+    "document_currency_code": "string",
+    "tax_subtotal": [
+      {
+        "tax_category_id": "string",
+        "tax_category_percent": "number",
+        "tax_scheme_id": "string",
+        "taxable_amount": "number",
+        "tax_amount": "number"
+      }
+    ]
+  },
+  "payment_terms": "string",
+  "payment_means_code": "string",
+  "payment_means": [{
+    "payee_financial_account": "string",
+    "bic_id": "string",
+    "financial_institution_name": "string"
+  }]
+}

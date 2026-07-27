@@ -1,0 +1,3896 @@
+openapi: 3.0.3
+info:
+  title: AI Documents Ingestion API
+  description: |
+    REST API for the AI Documents Ingestion multi-tenant system.
+    Provides management of tenants, mailboxes, and ingested messages.
+
+    ## Roles
+    - `global_tenant_admin` — full access including tenant management
+    - `tenant_admin` — mailbox management within own tenant
+    - `tenant_user` — message access within own tenant
+
+    ## Credential fields
+    Fields marked `writeOnly` (tenant `attachment_store_secrets`; mailbox
+    credential `credentials`; action `auth_credentials`) are accepted on
+    write but never returned in any response.
+  version: 0.11.0
+
+servers:
+  - url: localhost:8080/api/v1
+    description: API v1
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Tenants
+    description: Tenant management — requires role `global_tenant_admin`
+  - name: Mailboxes
+    description: Mailbox management — requires role `tenant_admin` or `global_tenant_admin`
+  - name: Messages
+    description: Message access — requires role `tenant_user`
+  - name: ConsumerStatus
+    description: |
+      Append-only audit log of how external systems reported handling a
+      message — requires role `mailbox_user`. See
+      docs/specs/external-message-consumers-api.md.
+  - name: Addresses
+    description: Tenant address management — requires role `tenant_admin` or `global_tenant_admin`
+  - name: MailboxCredentials
+    description: Mailbox credentials (IMAP, Outlook, Gmail) — requires role `tenant_admin` or `global_tenant_admin`
+  - name: Actions
+    description: Postprocessing actions (e.g. webhook notifications) and their mailbox links — requires role `tenant_admin` or `global_tenant_admin`
+  - name: Users
+    description: Human user management — requires role `global_tenant_admin`
+  - name: ServiceAccounts
+    description: Service account management — requires role `global_tenant_admin`
+  - name: Roles
+    description: Role grant/revoke for users and service accounts — requires role `global_tenant_admin` or `tenant_admin`
+  - name: IdentityProviders
+    description: Tenant-level federated identity provider management — requires role `global_tenant_admin`
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Paths
+# ──────────────────────────────────────────────────────────────────────────────
+paths:
+
+  # ── Tenants ─────────────────────────────────────────────────────────────────
+
+  /tenants:
+    post:
+      tags: [Tenants]
+      operationId: createTenant
+      summary: Create a tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantCreate'
+      responses:
+        '201':
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    get:
+      tags: [Tenants]
+      operationId: listTenants
+      summary: List tenants
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: active
+          in: query
+          schema:
+            type: boolean
+          description: Filter by active status
+        - name: include_deleted
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: When true, include soft-deleted tenants
+      responses:
+        '200':
+          description: Paginated list of tenants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedTenantResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+
+    get:
+      tags: [Tenants]
+      operationId: getTenant
+      summary: Get tenant by ID
+      responses:
+        '200':
+          description: Tenant found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags: [Tenants]
+      operationId: updateTenant
+      summary: Update tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantUpdate'
+      responses:
+        '200':
+          description: Tenant updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [Tenants]
+      operationId: deleteTenant
+      summary: Soft-delete a tenant
+      description: |
+        Sets `deleted_at` on the tenant record. Data is retained.
+        Use `DELETE /tenants/{tenantId}/purge` for permanent removal.
+        Returns 409 if the tenant is already soft-deleted.
+      responses:
+        '204':
+          description: Tenant soft-deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Tenant is already soft-deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/purge:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+
+    delete:
+      tags: [Tenants]
+      operationId: purgeTenant
+      summary: Permanently purge a soft-deleted tenant
+      description: |
+        Irreversibly removes the tenant and all associated mailboxes and messages.
+        The tenant must be soft-deleted first; returns 409 otherwise.
+      responses:
+        '204':
+          description: Tenant permanently deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Tenant has not been soft-deleted yet; call DELETE first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── Mailboxes ────────────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/mailboxes:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+
+    post:
+      tags: [Mailboxes]
+      operationId: createMailbox
+      summary: Create a mailbox
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailboxCreate'
+      responses:
+        '201':
+          description: Mailbox created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    get:
+      tags: [Mailboxes]
+      operationId: listMailboxes
+      summary: List mailboxes for a tenant
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: active
+          in: query
+          schema:
+            type: boolean
+          description: Filter by active status
+        - name: ingestor_type
+          in: query
+          schema:
+            $ref: '#/components/schemas/IngestorType'
+          description: Filter by ingestor type
+        - name: include_deleted
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: When true, include soft-deleted mailboxes in results
+      responses:
+        '200':
+          description: Paginated list of mailboxes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedMailboxResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+
+    get:
+      tags: [Mailboxes]
+      operationId: getMailbox
+      summary: Get mailbox by ID
+      responses:
+        '200':
+          description: Mailbox found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags: [Mailboxes]
+      operationId: updateMailbox
+      summary: Update mailbox
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailboxUpdate'
+      responses:
+        '200':
+          description: Mailbox updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [Mailboxes]
+      operationId: deleteMailbox
+      summary: Soft-delete a mailbox
+      description: |
+        Sets `deleted_at` on the mailbox record. Data is retained.
+        Use `DELETE …/purge` for permanent removal.
+        Returns 409 if the mailbox is already soft-deleted.
+      responses:
+        '204':
+          description: Mailbox soft-deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Mailbox is already soft-deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/purge:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+
+    delete:
+      tags: [Mailboxes]
+      operationId: purgeMailbox
+      summary: Permanently purge a soft-deleted mailbox
+      description: |
+        Irreversibly removes the mailbox and all associated messages.
+        The mailbox must be soft-deleted first; returns 409 otherwise.
+      responses:
+        '204':
+          description: Mailbox permanently deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Mailbox has not been soft-deleted yet; call DELETE first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/verify:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+
+    post:
+      tags: [Mailboxes]
+      operationId: verifyMailboxAccess
+      summary: Verify mailbox connectivity
+      description: |
+        Makes a lightweight request to the mailbox to verify that the
+        configuration (credentials, address, tenant) is correct and that
+        the mailbox is reachable. Sets `is_accessible` on the mailbox record
+        based on the result. Returns 200 in both cases; inspect `accessible`
+        in the response body to determine success.
+      responses:
+        '200':
+          description: Verification result (accessible or not)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxVerifyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── Messages ─────────────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+
+    get:
+      tags: [Messages]
+      operationId: listMessages
+      summary: List messages in a mailbox
+      description: |
+        Returns key properties only. `body_text` and full attachment details
+        are excluded; use the single-message endpoint for complete detail.
+        Soft-deleted messages are hidden unless `include_deleted=true`.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/PipelineStatus'
+          description: Filter by pipeline status
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Return messages received at or after this timestamp (RFC 3339)
+        - name: until
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Return messages received strictly before this timestamp (RFC 3339)
+        - name: include_deleted
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: When true, include soft-deleted messages in results
+      responses:
+        '200':
+          description: Paginated list of messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedMessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    get:
+      tags: [Messages]
+      operationId: getMessage
+      summary: Get message by ID
+      description: Returns full message detail including body text and attachment list.
+      responses:
+        '200':
+          description: Message found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetailResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [Messages]
+      operationId: deleteMessage
+      summary: Soft-delete a message
+      description: |
+        Sets `deleted_at` on the message record. Data is retained.
+        Use `DELETE …/purge` for permanent removal.
+        Returns 409 if the message is already soft-deleted.
+      responses:
+        '204':
+          description: Message soft-deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Message is already soft-deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/purge:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    delete:
+      tags: [Messages]
+      operationId: purgeMessage
+      summary: Permanently purge a soft-deleted message
+      description: |
+        Irreversibly removes the message record and all associated attachments.
+        The message must be soft-deleted first; returns 409 otherwise.
+      responses:
+        '204':
+          description: Message permanently deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Message has not been soft-deleted yet; call DELETE first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/reprocess:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    post:
+      tags: [Messages]
+      operationId: reprocessMessage
+      summary: Re-run pipeline for a single message
+      description: |
+        Resets a terminal message (processed or invalid) to stored status and
+        re-runs classification and parsing synchronously. Returns the updated
+        Message object on success.
+        Returns 409 if the message is in a transient status (in-flight); the
+        response body contains the current message state.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Reprocessing complete; body is the updated Message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Message is in-flight and cannot be reprocessed; body is the current message state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetailResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── Attachments ──────────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    get:
+      tags: [Messages]
+      operationId: listMessageAttachments
+      summary: List attachments for a message
+      description: Returns all attachment metadata for the given message, ordered by position.
+      responses:
+        '200':
+          description: List of attachments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AttachmentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/attachments/{attachmentId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+      - name: attachmentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+        description: Database ID of the attachment
+
+    get:
+      tags: [Messages]
+      operationId: getMessageAttachment
+      summary: Get attachment metadata by ID
+      responses:
+        '200':
+          description: Attachment metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── Parsed Documents ──────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/parsed-documents:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    get:
+      tags: [Messages]
+      operationId: listMessageParsedDocuments
+      summary: List parsed documents for a message
+      description: Returns all parsed document records for the given message.
+      responses:
+        '200':
+          description: List of parsed documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ParsedDocumentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/parsed-documents/{parsedDocumentId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+      - name: parsedDocumentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+        description: Database ID of the parsed document
+
+    get:
+      tags: [Messages]
+      operationId: getMessageParsedDocument
+      summary: Get a parsed document by ID
+      responses:
+        '200':
+          description: Parsed document record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParsedDocumentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── Consumer Status ─────────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/consumer_status:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    get:
+      tags: [ConsumerStatus]
+      operationId: listConsumerStatus
+      summary: List consumer status entries for a message
+      description: |
+        Append-only audit log of how external systems reported handling this
+        message, oldest first. There is no per-entry GET/PUT/DELETE — entries
+        are never mutated after creation.
+      responses:
+        '200':
+          description: List of consumer status entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConsumerStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [ConsumerStatus]
+      operationId: createConsumerStatus
+      summary: Record a consumer status entry for a message
+      description: |
+        `consumer_name` and `consumer_type` are free text supplied by the
+        client. `mailbox_id` and `created_by_user_id` are always derived
+        server-side, never taken from the request.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumerStatusCreate'
+      responses:
+        '201':
+          description: Created consumer status entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumerStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── Messages (simplified) ────────────────────────────────────────────────────────
+  # Mirrors every operation in the tenant/mailbox-scoped Messages and
+  # ConsumerStatus sections above, addressed by messageId alone. The caller
+  # must still hold a grant for the message's actual tenant and mailbox —
+  # these are resolved server-side (see MessageOwnership in
+  # docs/plans/external-message-consumers-api.md), not taken from the path.
+  # Response/request schemas are identical to their full-endpoint
+  # counterparts; only the path and operationId differ.
+
+  /messages/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    get:
+      tags: [Messages]
+      operationId: getMessageSimplified
+      summary: Get message by ID (simplified path)
+      description: Returns full message detail including body text and attachment list.
+      responses:
+        '200':
+          description: Message found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetailResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [Messages]
+      operationId: deleteMessageSimplified
+      summary: Soft-delete a message (simplified path)
+      description: |
+        Sets `deleted_at` on the message record. Data is retained.
+        Use `DELETE …/purge` for permanent removal.
+        Returns 409 if the message is already soft-deleted.
+      responses:
+        '204':
+          description: Message soft-deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Message is already soft-deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/purge:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    delete:
+      tags: [Messages]
+      operationId: purgeMessageSimplified
+      summary: Permanently purge a soft-deleted message (simplified path)
+      description: |
+        Irreversibly removes the message record and all associated attachments.
+        The message must be soft-deleted first; returns 409 otherwise.
+      responses:
+        '204':
+          description: Message permanently deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Message has not been soft-deleted yet; call DELETE first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/reprocess:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    post:
+      tags: [Messages]
+      operationId: reprocessMessageSimplified
+      summary: Re-run pipeline for a single message (simplified path)
+      description: |
+        Resets a terminal message (processed or invalid) to stored status and
+        re-runs classification and parsing synchronously. Returns the updated
+        Message object on success.
+        Returns 409 if the message is in a transient status (in-flight); the
+        response body contains the current message state.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Reprocessing complete; body is the updated Message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Message is in-flight and cannot be reprocessed; body is the current message state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetailResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    get:
+      tags: [Messages]
+      operationId: listMessageAttachmentsSimplified
+      summary: List attachments for a message (simplified path)
+      description: Returns all attachment metadata for the given message, ordered by position.
+      responses:
+        '200':
+          description: List of attachments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AttachmentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/attachments/{attachmentId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+      - name: attachmentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+        description: Database ID of the attachment
+
+    get:
+      tags: [Messages]
+      operationId: getMessageAttachmentSimplified
+      summary: Get attachment metadata by ID (simplified path)
+      responses:
+        '200':
+          description: Attachment metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/attachments/{attachmentId}/content:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+      - name: attachmentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+        description: Database ID of the attachment
+
+    get:
+      tags: [Messages]
+      operationId: downloadMessageAttachmentSimplified
+      summary: Download raw attachment bytes (simplified path)
+      description: |
+        Returns the original attachment binary as stored at ingest time.
+        Content-Type is the attachment's stored MIME type
+        (application/octet-stream when unknown). Returns 404 when the
+        attachment has no stored content.
+      responses:
+        '200':
+          description: Raw attachment bytes
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'attachment; filename="<original filename>"'
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/parsed-documents:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    get:
+      tags: [Messages]
+      operationId: listMessageParsedDocumentsSimplified
+      summary: List parsed documents for a message (simplified path)
+      description: Returns all parsed document records for the given message.
+      responses:
+        '200':
+          description: List of parsed documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ParsedDocumentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/parsed-documents/{parsedDocumentId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+      - name: parsedDocumentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+        description: Database ID of the parsed document
+
+    get:
+      tags: [Messages]
+      operationId: getMessageParsedDocumentSimplified
+      summary: Get a parsed document by ID (simplified path)
+      responses:
+        '200':
+          description: Parsed document record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParsedDocumentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/consumer_status:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    get:
+      tags: [ConsumerStatus]
+      operationId: listConsumerStatusSimplified
+      summary: List consumer status entries for a message (simplified path)
+      description: |
+        Append-only audit log of how external systems reported handling this
+        message, oldest first. There is no per-entry GET/PUT/DELETE — entries
+        are never mutated after creation.
+      responses:
+        '200':
+          description: List of consumer status entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConsumerStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [ConsumerStatus]
+      operationId: createConsumerStatusSimplified
+      summary: Record a consumer status entry for a message (simplified path)
+      description: |
+        `consumer_name` and `consumer_type` are free text supplied by the
+        client. `mailbox_id` and `created_by_user_id` are always derived
+        server-side, never taken from the request.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumerStatusCreate'
+      responses:
+        '201':
+          description: Created consumer status entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumerStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/addresses:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+    post:
+      tags: [Addresses]
+      operationId: createAddress
+      summary: Create an address for a tenant
+      description: |
+        Creates an address record for the tenant.
+        Set `mailbox_id` to create a mailbox-specific override;
+        omit it (or set to null) to create the global tenant address.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddressCreate'
+      responses:
+        '201':
+          description: Address created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Addresses]
+      operationId: listAddresses
+      summary: List addresses for a tenant
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: city
+          in: query
+          schema:
+            type: string
+        - name: postal_code
+          in: query
+          schema:
+            type: string
+        - name: country
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of addresses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedAddressResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/addresses/{addressId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - name: addressId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Addresses]
+      operationId: getAddress
+      summary: Get address by ID
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Address record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Addresses]
+      operationId: updateAddress
+      summary: Replace an address record
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddressUpdate'
+      responses:
+        '200':
+          description: Updated address
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Addresses]
+      operationId: deleteAddress
+      summary: Delete an address record
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── MailboxCredentials ────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/mailbox-credentials:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+    get:
+      tags: [MailboxCredentials]
+      operationId: listMailboxCredentials
+      summary: List mailbox credentials for a tenant
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: Paged list of mailbox credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedMailboxCredentialResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [MailboxCredentials]
+      operationId: createMailboxCredential
+      summary: Create a mailbox credential
+      description: |
+        Validates that the provided credentials are structurally correct for
+        the given type before storing. The `credentials` object is encrypted
+        at rest and never returned in any response.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailboxCredentialCreate'
+      responses:
+        '201':
+          description: Created mailbox credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxCredentialResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailbox-credentials/{credentialId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - name: credentialId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [MailboxCredentials]
+      operationId: getMailboxCredential
+      summary: Get a mailbox credential by ID
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Mailbox credential record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxCredentialResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [MailboxCredentials]
+      operationId: updateMailboxCredential
+      summary: Update a mailbox credential
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailboxCredentialUpdate'
+      responses:
+        '200':
+          description: Updated mailbox credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxCredentialResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [MailboxCredentials]
+      operationId: deleteMailboxCredential
+      summary: Delete a mailbox credential
+      description: |
+        Permanently removes the credential. Fails with 409 if any active mailbox references it.
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── Actions ──────────────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/actions:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+    get:
+      tags: [Actions]
+      operationId: listActions
+      summary: List postprocessing actions for a tenant
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: Paged list of actions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedActionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Actions]
+      operationId: createAction
+      summary: Create a postprocessing action
+      description: |
+        `auth_credentials` is encrypted at rest and never returned in any
+        response. Omit `auth_method`/`auth_credentials` entirely if the
+        webhook needs no authentication.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionCreate'
+      responses:
+        '201':
+          description: Created action
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/actions/{actionId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - name: actionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Actions]
+      operationId: getAction
+      summary: Get a postprocessing action by ID
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Action record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Actions]
+      operationId: updateAction
+      summary: Update a postprocessing action
+      description: |
+        All fields are optional; only provided fields are changed. Omitting
+        `auth_method` entirely preserves the existing credentials; sending
+        `auth_method: ""` clears them; sending any other `auth_method` value
+        together with `auth_credentials` replaces them.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionUpdate'
+      responses:
+        '200':
+          description: Updated action
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Actions]
+      operationId: deleteAction
+      summary: Delete a postprocessing action
+      description: |
+        Permanently removes the action and its mailbox links. Any
+        not-yet-delivered webhook_outbox entries for this action are
+        cascade-deleted along with it.
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/actions/{actionId}/validate:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - name: actionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [Actions]
+      operationId: validateAction
+      summary: Formally validate an action and run a live test call
+      description: |
+        Two-step, synchronous, single-attempt process: (1) formal validation
+        of the stored URL; (2) if that passes, a live test request — the same
+        wire format as a real webhook delivery (a bare JSON array), but empty
+        (`[]`) and with `mode=test` merged into the query string so the
+        receiver can distinguish it from a real delivery. Uses the same
+        per-request timeout as production dispatch. Steps short-circuit: if
+        formal validation fails, the live call is never attempted.
+
+        On success, `validated` is set to `true` on the action, which is a
+        prerequisite for `active: true` (see ActionCreate/ActionUpdate). On
+        failure, `validated` is set to `false`. Always returns `200` when
+        auth/authz/not-found pass — inspect `success` in the body to
+        determine the outcome, mirroring `POST .../mailboxes/{mailboxId}/verify`.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Validation result (of either step)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionValidateResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/actions/{actionId}/mailboxes:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - name: actionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Actions]
+      operationId: listActionMailboxes
+      summary: List mailboxes linked to an action
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Linked mailbox IDs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionMailboxList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Actions]
+      operationId: linkActionMailbox
+      summary: Link a mailbox to an action
+      description: |
+        Idempotent: linking an already-linked mailbox is a no-op. The
+        mailbox must belong to the same tenant as the action.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionMailboxLink'
+      responses:
+        '204':
+          description: Linked
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/actions/{actionId}/mailboxes/{mailboxId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - name: actionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/MailboxIdParam'
+    delete:
+      tags: [Actions]
+      operationId: unlinkActionMailbox
+      summary: Unlink a mailbox from an action
+      description: Removing a non-existent link is a no-op.
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Unlinked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Components
+# ──────────────────────────────────────────────────────────────────────────────
+  # ── Users ────────────────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/users:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+    get:
+      tags: [Users]
+      operationId: listTenantUsers
+      summary: List a tenant's human users
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: Paginated list of users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedUserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Users]
+      operationId: createTenantUser
+      summary: Create a human user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/UserIdParam'
+    get:
+      tags: [Users]
+      operationId: getTenantUser
+      summary: Get a human user by ID
+      description: |
+        Returns every field Zitadel exposes for this user (profile, contact
+        details, verification status) alongside the local active flag and
+        tenant-scoped role state.
+      responses:
+        '200':
+          description: User found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Users]
+      operationId: updateTenantUser
+      summary: Update a human user
+      description: |
+        All fields are optional; only provided fields are changed.
+        Setting `active` to false deactivates the user in Zitadel, revokes its
+        `email-bridge` login-gate grant, and marks it inactive locally — this
+        is the only supported way to remove a human user (no hard delete).
+        Setting `active` back to true reverses all three.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── Roles ────────────────────────────────────────────────────────────────────
+
+  /users/{userId}/roles:
+    parameters:
+      - $ref: '#/components/parameters/UserIdParam'
+    post:
+      tags: [Roles]
+      operationId: assignUserRole
+      summary: Grant a role to a user or service account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleGrant'
+      responses:
+        '204':
+          description: Role granted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Roles]
+      operationId: revokeUserRole
+      summary: Revoke a role from a user or service account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleGrant'
+      responses:
+        '204':
+          description: Role revoked
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── ServiceAccounts ──────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/service-accounts:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+    get:
+      tags: [ServiceAccounts]
+      operationId: listServiceAccounts
+      summary: List a tenant's service accounts
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: Paginated list of service accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedServiceAccountResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [ServiceAccounts]
+      operationId: createServiceAccount
+      summary: Create a service account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceAccountCreate'
+      responses:
+        '201':
+          description: Service account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAccountCreateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/service-accounts/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/UserIdParam'
+    get:
+      tags: [ServiceAccounts]
+      operationId: getServiceAccount
+      summary: Get a service account by ID
+      responses:
+        '200':
+          description: Service account found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAccountResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [ServiceAccounts]
+      operationId: updateServiceAccount
+      summary: Update a service account
+      description: All fields are optional; only provided fields are changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceAccountUpdate'
+      responses:
+        '200':
+          description: Service account updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAccountResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [ServiceAccounts]
+      operationId: deleteServiceAccount
+      summary: Delete a service account
+      description: |
+        Hard delete — unlike a human user, a service account has no
+        deactivate-only mode. Removes the Zitadel machine user and its local
+        row.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/service-accounts/{userId}/keys:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/UserIdParam'
+    post:
+      tags: [ServiceAccounts]
+      operationId: createServiceAccountKey
+      summary: Mint a new JWT-profile key for a service account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceAccountKeyCreate'
+      responses:
+        '201':
+          description: Key created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAccountKeyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/service-accounts/{userId}/keys/{keyId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/UserIdParam'
+      - $ref: '#/components/parameters/KeyIdParam'
+    delete:
+      tags: [ServiceAccounts]
+      operationId: deleteServiceAccountKey
+      summary: Revoke a service account's machine key
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/service-accounts/{userId}/pats:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/UserIdParam'
+    get:
+      tags: [ServiceAccounts]
+      operationId: listServiceAccountPats
+      summary: List a service account's personal access tokens
+      responses:
+        '200':
+          description: List of personal access tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedPersonalAccessTokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [ServiceAccounts]
+      operationId: createServiceAccountPat
+      summary: Issue a new personal access token for a service account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonalAccessTokenCreate'
+      responses:
+        '201':
+          description: Personal access token created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalAccessTokenCreateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/service-accounts/{userId}/pats/{tokenId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/UserIdParam'
+      - $ref: '#/components/parameters/TokenIdParam'
+    delete:
+      tags: [ServiceAccounts]
+      operationId: deleteServiceAccountPat
+      summary: Revoke a service account's personal access token
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── IdentityProviders ────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/idp-providers:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+    get:
+      tags: [IdentityProviders]
+      operationId: listIdpProviders
+      summary: List a tenant's federated identity providers
+      responses:
+        '200':
+          description: List of identity providers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedIdpProviderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [IdentityProviders]
+      operationId: createIdpProvider
+      summary: Attach a federated identity provider to a tenant's organisation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdpProviderCreate'
+      responses:
+        '201':
+          description: Identity provider attached
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT issued by the authentication service.
+        The `roles` claim must contain at least one of:
+        `global_tenant_admin`, `tenant_admin`, `tenant_user`.
+
+  # ── Reusable Parameters ──────────────────────────────────────────────────────
+  parameters:
+    TenantIdParam:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: UUID7 tenant identifier
+
+    MailboxIdParam:
+      name: mailboxId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: UUID7 mailbox identifier
+
+    MessageIdParam:
+      name: messageId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Provider-native message identifier (e.g. IMAP UID, Gmail message ID)
+
+    UserIdParam:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: UUID identifier of a user (human or service account)
+
+    KeyIdParam:
+      name: keyId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Zitadel machine key identifier
+
+    TokenIdParam:
+      name: tokenId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Personal access token identifier
+
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: Page number (1-based)
+
+    PageSizeParam:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: Number of items per page (max 100)
+
+  # ── Reusable Responses ───────────────────────────────────────────────────────
+  responses:
+    BadRequest:
+      description: Invalid request parameters or body
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid JWT token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Authenticated user lacks the required role
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  # ── Schemas ──────────────────────────────────────────────────────────────────
+  schemas:
+
+    # ── Common ──────────────────────────────────────────────────────────────────
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code (e.g. TENANT_NOT_FOUND, INVALID_INPUT)
+        message:
+          type: string
+          description: Human-readable error description
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional additional context (field errors, trace IDs, etc.)
+
+    PaginationMeta:
+      type: object
+      required: [total, page, page_size]
+      properties:
+        total:
+          type: integer
+          description: Total number of matching records
+        page:
+          type: integer
+          description: Current page number (1-based)
+        page_size:
+          type: integer
+          description: Number of items returned in this page
+
+    # ── Enumerations ─────────────────────────────────────────────────────────────
+
+    IngestorType:
+      type: string
+      enum: [imap, pop3, gmail, outlook]
+      description: Email source adapter type
+
+    PipelineStatus:
+      type: string
+      enum: [stored, classified, llm_parsed, parsed, processed, invalid]
+      description: |
+        Current pipeline processing stage of a message.
+        Statuses advance forward only: stored → classified → llm_parsed → parsed → processed.
+        `invalid` is a terminal dead-letter status.
+
+    DocumentType:
+      type: string
+      enum:
+        - invoice
+        - order
+        - delivery
+        - inquiry
+        - request-for-quotation
+        - order-confirmation
+        - payment-announcement
+        - payment-reminder
+        - work
+        - legal
+        - accounting
+        - information
+        - spam
+        - image
+        - unknown
+      description: Business classification of an ingested document
+
+    # ── Tenant ───────────────────────────────────────────────────────────────────
+
+    TenantCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Display name of the tenant
+        active:
+          type: boolean
+          default: true
+          description: Whether the ingestor service is allowed to run for this tenant
+        service_start:
+          type: string
+          format: date-time
+          description: Earliest time the scan service may run for this tenant (RFC 3339)
+        service_end:
+          type: string
+          format: date-time
+          nullable: true
+          description: Service expiry time. Null means the service runs indefinitely.
+        max_tokens_per_period:
+          type: integer
+          format: int64
+          nullable: true
+          description: LLM token usage cap per billing period. Null means unlimited.
+        token_alert_threshold:
+          type: integer
+          format: int64
+          nullable: true
+          description: Alert when cumulative token usage crosses this value. Null means no alert.
+        attachment_store_type:
+          type: string
+          enum: [local, s3, gcs, azure]
+          default: local
+          description: Storage backend for attachments
+        attachment_store_params:
+          type: object
+          additionalProperties:
+            type: string
+          description: Non-secret backend configuration (e.g. bucket name, region, path)
+        attachment_store_secrets:
+          type: object
+          additionalProperties:
+            type: string
+          writeOnly: true
+          description: Secret backend configuration (e.g. access keys). Write-only — never returned.
+
+    TenantUpdate:
+      type: object
+      description: All fields are optional; only provided fields are updated.
+      properties:
+        name:
+          type: string
+        active:
+          type: boolean
+        service_start:
+          type: string
+          format: date-time
+        service_end:
+          type: string
+          format: date-time
+          nullable: true
+        max_tokens_per_period:
+          type: integer
+          format: int64
+          nullable: true
+        token_alert_threshold:
+          type: integer
+          format: int64
+          nullable: true
+        attachment_store_type:
+          type: string
+          enum: [local, s3, gcs, azure]
+        attachment_store_params:
+          type: object
+          additionalProperties:
+            type: string
+        attachment_store_secrets:
+          type: object
+          additionalProperties:
+            type: string
+          writeOnly: true
+          description: Secret backend configuration. Write-only — never returned.
+
+    TenantResponse:
+      type: object
+      required: [id, name, active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID7 tenant identifier
+        name:
+          type: string
+        active:
+          type: boolean
+        service_start:
+          type: string
+          format: date-time
+          nullable: true
+        service_end:
+          type: string
+          format: date-time
+          nullable: true
+        max_tokens_per_period:
+          type: integer
+          format: int64
+          nullable: true
+        token_alert_threshold:
+          type: integer
+          format: int64
+          nullable: true
+        attachment_store_type:
+          type: string
+          enum: [local, s3, gcs, azure]
+        attachment_store_params:
+          type: object
+          additionalProperties:
+            type: string
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set when the tenant has been soft-deleted. Null means not deleted.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PagedTenantResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantResponse'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    # ── Mailbox ───────────────────────────────────────────────────────────────────
+
+    MailboxCreate:
+      type: object
+      required: [ingestor_type, display_name, email_address]
+      properties:
+        ingestor_type:
+          $ref: '#/components/schemas/IngestorType'
+        display_name:
+          type: string
+          description: Human-readable label for this mailbox
+        active:
+          type: boolean
+          default: true
+          description: Whether this mailbox is included in polling cycles
+        email_address:
+          type: string
+          format: email
+          description: Email address to poll
+        credential_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID of the GenericMailboxCredential to use for authentication
+        folders_to_scan:
+          type: array
+          items:
+            type: string
+          description: IMAP folder names to poll (e.g. ["INBOX", "Documents"])
+        root_folder_prefix:
+          type: string
+          description: Optional prefix applied to all folder names
+        poll_interval_seconds:
+          type: integer
+          default: 300
+          description: Polling interval in seconds
+        max_messages:
+          type: integer
+          default: 0
+          description: Maximum messages fetched per poll cycle. 0 means unlimited.
+        since_time:
+          type: string
+          format: date-time
+          description: Initial lower bound for server-side date filtering (RFC 3339)
+        until_time:
+          type: string
+          format: date-time
+          description: Optional upper bound for server-side date filtering (RFC 3339). Emails received at or after this time are excluded.
+        poll_timeout_seconds:
+          type: integer
+          default: 60
+          description: Hard deadline for a single poll cycle in seconds
+
+    MailboxUpdate:
+      type: object
+      description: All fields are optional; only provided fields are updated.
+      properties:
+        display_name:
+          type: string
+        active:
+          type: boolean
+        credential_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID of the GenericMailboxCredential to use for authentication
+        folders_to_scan:
+          type: array
+          items:
+            type: string
+        root_folder_prefix:
+          type: string
+        poll_interval_seconds:
+          type: integer
+        max_messages:
+          type: integer
+        since_time:
+          type: string
+          format: date-time
+        until_time:
+          type: string
+          format: date-time
+        poll_timeout_seconds:
+          type: integer
+
+    MailboxResponse:
+      type: object
+      required: [id, tenant_id, ingestor_type, display_name, active, email_address, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID7 mailbox identifier
+        tenant_id:
+          type: string
+          format: uuid
+        ingestor_type:
+          $ref: '#/components/schemas/IngestorType'
+        display_name:
+          type: string
+        active:
+          type: boolean
+        email_address:
+          type: string
+          format: email
+        credential_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID of the GenericMailboxCredential used for authentication
+        folders_to_scan:
+          type: array
+          items:
+            type: string
+        root_folder_prefix:
+          type: string
+        poll_interval_seconds:
+          type: integer
+        max_messages:
+          type: integer
+        since_time:
+          type: string
+          format: date-time
+          nullable: true
+        until_time:
+          type: string
+          format: date-time
+          nullable: true
+        last_processed_message_id:
+          type: string
+          nullable: true
+          description: Provider-native ID of the last successfully processed message
+        last_processed_at:
+          type: string
+          format: date-time
+          nullable: true
+        poll_timeout_seconds:
+          type: integer
+        is_accessible:
+          type: boolean
+          readOnly: true
+          description: |
+            True when the last verify call succeeded; false by default until
+            verified. The scanner skips mailboxes where this is false.
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set when the mailbox has been soft-deleted. Null means not deleted.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    MailboxVerifyResponse:
+      type: object
+      required: [accessible]
+      properties:
+        accessible:
+          type: boolean
+          description: True if the mailbox is reachable and correctly configured.
+        reason:
+          type: string
+          nullable: true
+          description: Human-readable reason when accessible is false.
+
+    PagedMailboxResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailboxResponse'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    # ── Message ───────────────────────────────────────────────────────────────────
+
+    ClassificationEntry:
+      type: object
+      required: [part, confidence, document_type]
+      properties:
+        part:
+          type: integer
+          description: Attachment index (-1 = email body).
+        name:
+          type: string
+          description: Attachment filename, or 'body' for the email body.
+        confidence:
+          type: number
+          format: double
+          description: Classification confidence score [0, 1].
+        document_type:
+          type: string
+          description: Classified document type.
+        summary:
+          type: string
+          description: One-sentence description of this document part.
+
+    AttachmentSummary:
+      type: object
+      required: [filename, mime_type]
+      properties:
+        filename:
+          type: string
+        mime_type:
+          type: string
+        content_disposition:
+          type: string
+          description: Value of the Content-Disposition header (e.g. "attachment", "inline")
+        storage_key:
+          type: string
+          description: |
+            Storage URI set after the attachment has been persisted
+            (e.g. "local://msg123/invoice.pdf", "s3://bucket/msg123/invoice.pdf").
+            Empty if not yet stored.
+
+    MessageResponse:
+      type: object
+      description: |
+        Abbreviated message record returned in list responses.
+        `body_text`, CC recipients, and full attachment details are excluded.
+      required: [id, tenant_id, mailbox_id, source, received_at, from, subject, pipeline_status]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal UUID-7 primary key assigned at persistence time
+        external_msg_id:
+          type: string
+          description: Provider-native message identifier (e.g. IMAP UID hash, Gmail message ID). Used for deduplication.
+        tenant_id:
+          type: string
+          format: uuid
+        mailbox_id:
+          type: string
+          format: uuid
+        source:
+          type: string
+          description: Ingestor adapter that produced this message (imap, gmail, outlook)
+        received_at:
+          type: string
+          format: date-time
+        from:
+          type: string
+          description: Sender address
+        to:
+          type: array
+          items:
+            type: string
+          description: Primary recipient addresses
+        subject:
+          type: string
+        pipeline_status:
+          $ref: '#/components/schemas/PipelineStatus'
+        is_forwarded:
+          type: boolean
+          description: True when the message was identified as a forwarded email
+        original_from:
+          type: string
+          nullable: true
+          description: Original sender when the message is a forwarded email
+        attachment_count:
+          type: integer
+          description: Number of attachments
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set when the message has been soft-deleted. Null means not deleted.
+        classifications:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClassificationEntry'
+          description: Per-part classification entries (email body and each parsed attachment).
+
+    MessageDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/MessageResponse'
+        - type: object
+          description: Full message detail including body text, HTML body, attachment list, and stage result.
+          properties:
+            cc:
+              type: array
+              items:
+                type: string
+              description: CC recipient addresses
+            body_text:
+              type: string
+              description: Plain-text message body
+            body_html:
+              type: string
+              description: HTML message body
+            original_to:
+              type: string
+              nullable: true
+              description: Original primary recipient when the message is a forwarded email
+            forwarders:
+              type: string
+              nullable: true
+              description: Comma-separated forwarder addresses, most-recent forwarder first
+            attachments:
+              type: array
+              items:
+                $ref: '#/components/schemas/AttachmentSummary'
+            stage_result:
+              $ref: '#/components/schemas/MessageStageResult'
+
+    PagedMessageResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageResponse'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    # ── Stage Result ──────────────────────────────────────────────────────────────
+
+    StageMetadataInfo:
+      type: object
+      description: Processing provenance for a single pipeline stage.
+      properties:
+        parser:
+          type: string
+          description: Identifier of the component that produced this result
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        duration_seconds:
+          type: number
+          format: double
+        llm_model_name:
+          type: string
+          nullable: true
+        llm_input_tokens:
+          type: integer
+          format: int64
+          nullable: true
+        llm_output_tokens:
+          type: integer
+          format: int64
+          nullable: true
+        llm_inference_time_ms:
+          type: integer
+          format: int64
+          nullable: true
+
+    StageResultClassification:
+      type: object
+      description: Classification result section of the pipeline stage result.
+      properties:
+        document_types:
+          type: array
+          items:
+            type: string
+          description: Document types detected in the message
+        contact_type:
+          type: string
+          description: Business relationship of the sender
+        confidence:
+          type: number
+          format: double
+        short_summary:
+          type: string
+          description: One-sentence LLM summary of the message
+        stage_metadata:
+          $ref: '#/components/schemas/StageMetadataInfo'
+
+    StageResultDocument:
+      type: object
+      description: Parsed document summary within the stage result.
+      properties:
+        attachment_id:
+          type: integer
+          format: int64
+          description: Database ID of the source attachment (FK to attachments table)
+        attachment_name:
+          type: string
+        document_type_code:
+          type: string
+          description: UN/CEFACT UNCL 1001 code (e.g. "380" for Invoice)
+        document_type_name:
+          type: string
+          description: Human-readable document type label
+        document_date:
+          type: string
+          format: date
+          nullable: true
+        document_number:
+          type: string
+          nullable: true
+        summary:
+          type: string
+          nullable: true
+          description: One-sentence LLM-generated description of the document
+        stage_metadata:
+          $ref: '#/components/schemas/StageMetadataInfo'
+
+    MessageStageResult:
+      type: object
+      description: Streamlined pipeline processing result returned alongside a message detail.
+      properties:
+        classification:
+          $ref: '#/components/schemas/StageResultClassification'
+        documents:
+          type: array
+          items:
+            $ref: '#/components/schemas/StageResultDocument'
+
+    # ── Attachment ────────────────────────────────────────────────────────────────
+
+    AttachmentResponse:
+      type: object
+      required: [id, message_id, position, filename, mime_type]
+      description: Full attachment metadata record.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Database-assigned attachment ID
+        message_id:
+          type: string
+          description: ID of the parent message
+        position:
+          type: integer
+          description: Zero-based position index within the message
+        filename:
+          type: string
+        mime_type:
+          type: string
+        content_disposition:
+          type: string
+          nullable: true
+        storage_key:
+          type: string
+          nullable: true
+          description: |
+            Storage URI (e.g. "local://msg123/invoice.pdf", "s3://bucket/key").
+            Empty if not yet stored.
+
+    # ── Parsed Document ───────────────────────────────────────────────────────────
+
+    ParsedDocumentResponse:
+      type: object
+      required: [id, message_id, attachment_index, document_type, data_type, is_fully_parsed, created_at]
+      description: Parsed document record from the parsed_documents table.
+      properties:
+        id:
+          type: integer
+          format: int64
+        message_id:
+          type: string
+        attachment_index:
+          type: integer
+          description: Zero-based index of the source attachment (-1 for body)
+        attachment_name:
+          type: string
+        document_type:
+          type: string
+          description: Classified document type (e.g. "invoice", "order")
+        data_type:
+          type: string
+          description: How the data field is encoded ("json" or "binary")
+        data:
+          description: Parsed document payload; structure depends on data_type and document_type
+        stage_parser:
+          type: string
+        stage_completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        stage_duration_s:
+          type: number
+          format: double
+        llm_model_name:
+          type: string
+          nullable: true
+        llm_input_tokens:
+          type: integer
+          format: int64
+          nullable: true
+        llm_output_tokens:
+          type: integer
+          format: int64
+          nullable: true
+        llm_inference_time_ms:
+          type: integer
+          format: int64
+          nullable: true
+        is_fully_parsed:
+          type: boolean
+        is_deduplicated_by:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Consumer Status ───────────────────────────────────────────────────────────
+    # See docs/specs/external-message-consumers-api.md. Append-only audit log —
+    # no update/delete schemas exist since entries are never mutated.
+
+    ConsumerStatusValue:
+      type: string
+      enum: [imported, failed, skipped]
+      description: Outcome an external consumer reports for a message.
+
+    ConsumerStatusCreate:
+      type: object
+      required: [consumer_name, consumer_type, status]
+      properties:
+        consumer_name:
+          type: string
+          description: Free-text identifier of the reporting consumer instance, supplied by the client.
+        consumer_type:
+          type: string
+          description: Free-text category of the reporting consumer, supplied by the client (e.g. "odoo-email-bridge").
+        status:
+          $ref: '#/components/schemas/ConsumerStatusValue'
+
+    ConsumerStatusResponse:
+      type: object
+      required: [id, tenant_id, message_id, mailbox_id, consumer_name, consumer_type, status, created_by_user_id, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        message_id:
+          type: string
+          format: uuid
+        mailbox_id:
+          type: string
+          format: uuid
+          description: The message's mailbox, resolved server-side — always in sync with the referenced message.
+        consumer_name:
+          type: string
+        consumer_type:
+          type: string
+        status:
+          $ref: '#/components/schemas/ConsumerStatusValue'
+        created_by_user_id:
+          type: string
+          format: uuid
+          description: Local user UUID of the authenticated caller that wrote this entry.
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Business Document ─────────────────────────────────────────────────────────
+    # Field names aligned with domain.Document (internal Go struct).
+
+    Document:
+      type: object
+      description: |
+        Canonical parsed business document produced by the pipeline (Stage 3).
+        Normalises output from CII, UBL, ZUGFeRD, PDF, and LLM-based parsers.
+      properties:
+        document_type_name:
+          type: string
+          description: Human-readable document type label (e.g. "Commercial Invoice")
+        document_type_code:
+          type: string
+          description: UN/CEFACT UNCL 1001 code (e.g. "380" for Invoice, "381" for Credit Note)
+        document_number:
+          type: string
+          description: Document / invoice number
+        reference:
+          type: string
+          description: Buyer order number or cross-reference carried on the document
+        project:
+          type: string
+          description: Project reference
+        document_date:
+          type: string
+          format: date
+          description: Document issue date
+        due_date:
+          type: string
+          format: date
+          nullable: true
+          description: Payment due date. Absent if not explicitly stated.
+        note:
+          type: string
+          description: Free-text note
+        sender:
+          $ref: '#/components/schemas/Party'
+        recipient:
+          $ref: '#/components/schemas/Party'
+        line_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItem'
+        totals:
+          $ref: '#/components/schemas/Totals'
+        payment_terms:
+          type: string
+        payment_method:
+          type: string
+        paid:
+          type: boolean
+          description: True when the document has already been paid
+        bank_accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/BankAccount'
+        additional_info:
+          type: string
+        summary:
+          type: string
+          description: One-sentence LLM-generated description of the document
+        document_language:
+          type: string
+          description: ISO 639-1 language code of the document (e.g. "de", "en")
+
+    Party:
+      type: object
+      description: A business entity — either the sender or the recipient of a document.
+      properties:
+        name:
+          type: string
+          description: Full formal name of the party
+        street:
+          type: string
+        postal_code:
+          type: string
+        city:
+          type: string
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code (e.g. "DE")
+        vat_id:
+          type: string
+          description: VAT registration number (e.g. "DE123456789")
+        tax_id:
+          type: string
+          description: Local tax number (e.g. "12/345/67890")
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+
+    LineItem:
+      type: object
+      description: A single position on a document.
+      properties:
+        position:
+          type: integer
+          description: Line position number (1-based)
+        description:
+          type: string
+        quantity:
+          type: string
+          description: Quantity as a decimal string (preserves precision)
+        unit:
+          type: string
+          description: Unit of measure (e.g. "pcs", "h", "kg")
+        unit_price:
+          type: string
+          description: Net unit price after discounts (decimal string)
+        discount:
+          type: string
+          description: Absolute discount amount applied to this line (decimal string)
+        net_amount:
+          type: string
+          description: Line net amount — quantity × net unit price (decimal string)
+        gross_amount:
+          type: string
+          description: Line gross amount including tax (decimal string)
+        tax_rate:
+          type: string
+          description: VAT rate as percentage (e.g. "19.00")
+        tax_amount:
+          type: string
+          description: VAT amount for this line (decimal string)
+
+    Totals:
+      type: object
+      description: Aggregated monetary values for a document.
+      properties:
+        net_amount:
+          type: string
+          description: Sum of all line net amounts (decimal string)
+        discount:
+          type: string
+          description: Total document-level discount (decimal string)
+        taxes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxEntry'
+          description: Tax breakdown by rate
+        total_tax:
+          type: string
+          description: Total tax amount across all rates (decimal string)
+        gross_amount:
+          type: string
+          description: Total gross amount including all taxes (decimal string)
+        open_amount:
+          type: string
+          description: Outstanding amount (gross minus any prepayments) (decimal string)
+        currency:
+          type: string
+          description: ISO 4217 currency code (e.g. "EUR", "USD")
+
+    TaxEntry:
+      type: object
+      description: One tax-rate bucket and its computed amount within Totals.
+      properties:
+        tax_rate:
+          type: string
+          description: Tax rate as percentage (decimal string, e.g. "19.00")
+        tax_amount:
+          type: string
+          description: Tax amount for this rate bucket (decimal string)
+
+    BankAccount:
+      type: object
+      description: Payment routing information.
+      properties:
+        iban:
+          type: string
+          description: IBAN of the payee account
+        bic:
+          type: string
+          description: BIC/SWIFT code
+        bank_name:
+          type: string
+          description: Name of the financial institution
+
+    AddressCreate:
+      type: object
+      required: [name]
+      properties:
+        mailbox_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            When set, creates a mailbox-specific address override.
+            When omitted or null, creates the global tenant address.
+        name:
+          type: string
+          description: Legal entity name
+        street:
+          type: string
+        postal_code:
+          type: string
+        city:
+          type: string
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code (e.g. "DE")
+        vat_id:
+          type: string
+          description: VAT identification number
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+
+    AddressUpdate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        street:
+          type: string
+        postal_code:
+          type: string
+        city:
+          type: string
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code (e.g. "DE")
+        vat_id:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+
+    AddressResponse:
+      type: object
+      required: [id, tenant_id, name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        mailbox_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Null for global tenant address; set for mailbox-specific override.
+        name:
+          type: string
+        street:
+          type: string
+        postal_code:
+          type: string
+        city:
+          type: string
+        country:
+          type: string
+        vat_id:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PagedAddressResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AddressResponse'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    MailboxCredentialType:
+      type: string
+      enum: [imap, outlook, gmail]
+      description: |
+        Identifies the ingestor type for a mailbox credential.
+        - `imap`: credentials JSON contains host, port, ssl, tls, username, password
+        - `outlook`: credentials JSON contains azure_tenant_id, client_id, client_secret
+        - `gmail`: credentials JSON contains service_account_json
+
+    MailboxCredentialCreate:
+      type: object
+      required: [type, name, credentials]
+      properties:
+        type:
+          $ref: '#/components/schemas/MailboxCredentialType'
+        name:
+          type: string
+          description: Human-readable label for this credential set
+        credentials:
+          type: object
+          writeOnly: true
+          description: |
+            Type-specific credential object — accepted on write, encrypted at rest, never returned.
+            imap: { host, port, ssl, tls, username, password }
+            outlook: { azure_tenant_id, client_id, client_secret }
+            gmail: { service_account_json }
+
+    MailboxCredentialUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        credentials:
+          type: object
+          writeOnly: true
+          description: Replace the stored credentials — encrypted at rest, never returned.
+
+    MailboxCredentialResponse:
+      type: object
+      required: [id, tenant_id, type, name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/MailboxCredentialType'
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PagedMailboxCredentialResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailboxCredentialResponse'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    # ── Actions ──────────────────────────────────────────────────────────────────
+
+    ActionType:
+      type: string
+      enum: [webhook]
+      description: Identifies the postprocessing adapter. Only `webhook` is supported today.
+
+    AuthMethod:
+      type: string
+      enum: ["", bearer, jwt, api_key_header, basic]
+      description: |
+        How the webhook call authenticates. Admin-selected — never auto-detected.
+        - `bearer`, `jwt`: auth_credentials = { token }, sent as `Authorization: Bearer <token>`.
+        - `api_key_header`: auth_credentials = { header_name, value }, sent as a custom header.
+        - `basic`: auth_credentials = { username, password }, sent as HTTP Basic auth.
+        - `""` (empty): no authentication. On ActionUpdate, sending auth_method: ""
+          explicitly clears any existing credentials; omitting auth_method
+          entirely leaves existing credentials unchanged.
+
+    ActionCreate:
+      type: object
+      required: [type, url]
+      properties:
+        type:
+          $ref: '#/components/schemas/ActionType'
+        url:
+          type: string
+          description: The webhook URL to be called.
+        auth_method:
+          $ref: '#/components/schemas/AuthMethod'
+        auth_credentials:
+          type: object
+          writeOnly: true
+          description: |
+            Method-specific credential object — accepted on write, encrypted at
+            rest, never returned. Required when auth_method is set; omit both
+            fields for no authentication. Schema depends on auth_method (see
+            AuthMethod).
+        active:
+          type: boolean
+          default: false
+          description: |
+            Always rejected as true on create (400) — a newly created action
+            has never been validated. Activate via ActionUpdate after a
+            successful POST .../validate.
+
+    ActionUpdate:
+      type: object
+      description: |
+        All fields are optional; only provided fields are changed. To change
+        or clear authentication, send both auth_method and auth_credentials
+        together (send auth_method: null with no auth_credentials to clear).
+      properties:
+        url:
+          type: string
+        auth_method:
+          $ref: '#/components/schemas/AuthMethod'
+        auth_credentials:
+          type: object
+          writeOnly: true
+          description: Replace the stored credentials — encrypted at rest, never returned.
+        active:
+          type: boolean
+          description: |
+            Sending true is rejected (400) unless the action is currently
+            validated. Changing url/auth_method/auth_credentials in the same
+            request resets validated to false first, so true together with
+            any of those in one request is always rejected — validate again
+            after the configuration change lands.
+
+    ActionResponse:
+      type: object
+      required: [id, tenant_id, type, url, active, validated, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/ActionType'
+        url:
+          type: string
+        auth_method:
+          $ref: '#/components/schemas/AuthMethod'
+        active:
+          type: boolean
+        validated:
+          type: boolean
+          description: |
+            Server-controlled. True once POST .../validate has succeeded for
+            the current url/auth_method/auth_credentials; reset to false by
+            any change to those fields.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ActionValidateResponse:
+      type: object
+      required: [step, success, reason]
+      properties:
+        step:
+          type: string
+          enum: [formal_validation, live_test]
+          description: Which of the two steps this result is for.
+        success:
+          type: boolean
+        status_code:
+          type: integer
+          nullable: true
+          description: HTTP status code returned by the live test call. Null for the formal_validation step.
+        reason:
+          type: string
+          description: Human-readable failure reason; empty on success.
+
+    PagedActionResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionResponse'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    ActionMailboxLink:
+      type: object
+      required: [mailbox_id]
+      properties:
+        mailbox_id:
+          type: string
+          format: uuid
+
+    ActionMailboxList:
+      type: object
+      required: [mailbox_ids]
+      properties:
+        mailbox_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    # ── Roles ────────────────────────────────────────────────────────────────────
+
+    Role:
+      type: string
+      enum: [email-bridge, global_tenant_admin, tenant_admin, mailbox_user]
+      description: |
+        System-managed authorization role. `email-bridge` is the mandatory
+        IdP login gate, granted/revoked directly in Zitadel rather than
+        stored locally; every other role is a local grant.
+
+    RoleGrant:
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: '#/components/schemas/Role'
+        tenant_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Required for every role — the assignee's own home tenant.
+        mailbox_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Required only for mailbox_user.
+
+    # ── Users ────────────────────────────────────────────────────────────────────
+
+    UserCreate:
+      type: object
+      required: [email, given_name, family_name]
+      properties:
+        email:
+          type: string
+          format: email
+        given_name:
+          type: string
+        family_name:
+          type: string
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleGrant'
+          description: Initial role grants beyond the automatic email-bridge grant.
+
+    UserUpdate:
+      type: object
+      description: All fields are optional; only provided fields are changed.
+      properties:
+        given_name:
+          type: string
+        family_name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+          description: |
+            Setting to false deactivates the user (Zitadel + email-bridge
+            revoke + local flag); setting to true reverses it. See
+            /tenants/{tenantId}/users/{userId} PUT.
+
+    UserResponse:
+      type: object
+      required: [id, tenant_id, email, active, given_name, family_name, is_tenant_admin]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        active:
+          type: boolean
+          description: Local active flag.
+        given_name:
+          type: string
+        family_name:
+          type: string
+        is_tenant_admin:
+          type: boolean
+        mailbox_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        username:
+          type: string
+          description: Zitadel username.
+        email_verified:
+          type: boolean
+        phone:
+          type: string
+        phone_verified:
+          type: boolean
+        state:
+          type: string
+          enum: [unspecified, active, inactive, deleted, locked, initial]
+          description: Zitadel-side user state.
+
+    PagedUserResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserResponse'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    # ── ServiceAccounts ──────────────────────────────────────────────────────────
+
+    AccessTokenType:
+      type: string
+      enum: [bearer, jwt]
+      description: |
+        Format of tokens the service account's own PAT/session obtains.
+        Unrelated to how the account authenticates to Zitadel (always a
+        JWT-profile key). A bearer-typed account cannot authenticate to this
+        app's own API — only jwt-typed accounts can.
+
+    ServiceAccountCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleGrant'
+          description: Initial role grants beyond the automatic email-bridge grant.
+        public_key_pem:
+          type: string
+          description: |
+            Caller-supplied RSA public key (PEM). Preferred — the private key
+            never transits this app. Omit to have Zitadel generate a keypair.
+        expires_at:
+          type: string
+          format: date-time
+          description: Initial machine key expiration. Omit for the server default.
+
+    ServiceAccountCreateResponse:
+      type: object
+      required: [user_id, key_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        key_id:
+          type: string
+        key:
+          type: string
+          format: byte
+          description: |
+            One-time JWT-profile private-key material, exactly as Zitadel
+            returned it. Empty when public_key_pem was supplied. Never
+            returned again after this call and never persisted server-side.
+
+    ServiceAccountUpdate:
+      type: object
+      description: All fields are optional; only provided fields are changed.
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        access_token_type:
+          $ref: '#/components/schemas/AccessTokenType'
+        is_tenant_admin:
+          type: boolean
+        mailbox_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Full desired set of mailbox_user grants — replaces the existing set.
+
+    ServiceAccountResponse:
+      type: object
+      required: [user_id, tenant_id, name]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        access_token_type:
+          $ref: '#/components/schemas/AccessTokenType'
+        is_tenant_admin:
+          type: boolean
+        mailbox_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    PagedServiceAccountResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceAccountResponse'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    ServiceAccountKeyCreate:
+      type: object
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+          description: Omit for the server default (10 years).
+
+    ServiceAccountKeyResponse:
+      type: object
+      required: [key_id]
+      properties:
+        key_id:
+          type: string
+        key:
+          type: string
+          format: byte
+          description: One-time private-key material. Never returned again; never persisted server-side.
+
+    PersonalAccessTokenCreate:
+      type: object
+      required: [expires_at]
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+
+    PersonalAccessTokenCreateResponse:
+      type: object
+      required: [token_id, token]
+      properties:
+        token_id:
+          type: string
+        token:
+          type: string
+          description: One-time plain-text credential. Never returned again; never persisted server-side.
+
+    PersonalAccessTokenResponse:
+      type: object
+      required: [id, expires_at, created_at]
+      properties:
+        id:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    PagedPersonalAccessTokenResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersonalAccessTokenResponse'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    # ── IdentityProviders ────────────────────────────────────────────────────────
+
+    IdpProviderCreate:
+      type: object
+      required: [name, client_id, client_secret, issuer]
+      properties:
+        name:
+          type: string
+        client_id:
+          type: string
+        client_secret:
+          type: string
+          writeOnly: true
+        issuer:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        auto_register:
+          type: boolean
+          default: false
+
+    IdpProviderResponse:
+      type: object
+      required: [id, name, is_active]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        is_active:
+          type: boolean
+
+    PagedIdpProviderResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdpProviderResponse'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
