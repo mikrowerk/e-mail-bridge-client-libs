@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from email_bridge_client import ConsumerStatus, MessageDetail, ParsedDocument
+from email_bridge_client import Backlink, ConsumerStatus, MessageDetail, ParsedDocument
 
 
 class TestMessageDetail:
@@ -71,3 +71,29 @@ class TestConsumerStatus:
         assert cs.status == "imported"
         assert cs.consumer_type == "odoo-email-bridge"
         assert cs.created_at.tzinfo is not None
+        assert cs.backlinks == (
+            Backlink(
+                url="https://odoo.example.com/odoo/invoices/42",
+                status="imported",
+                title="Invoice INV/2026/0042",
+            ),
+            Backlink(url="https://odoo.example.com/odoo/contacts/7", status="related"),
+        )
+
+    def test_from_dict_without_backlinks(self, consumer_status_payload: dict):
+        payload = {k: v for k, v in consumer_status_payload.items() if k != "backlinks"}
+        cs = ConsumerStatus.from_dict(payload)
+        assert cs.backlinks == ()
+
+
+class TestBacklink:
+    def test_to_dict_omits_absent_title(self):
+        assert Backlink(url="https://x/1", status="related").to_dict() == {
+            "url": "https://x/1",
+            "status": "related",
+        }
+        assert Backlink(url="https://x/1", status="imported", title="Rec").to_dict() == {
+            "url": "https://x/1",
+            "status": "imported",
+            "title": "Rec",
+        }

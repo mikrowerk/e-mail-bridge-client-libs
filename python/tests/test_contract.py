@@ -108,6 +108,13 @@ class TestResponseContracts:
                     "consumer_name": "odoo-prod",
                     "consumer_type": "odoo-email-bridge",
                     "status": "imported",
+                    "backlinks": [
+                        {
+                            "url": "https://odoo.example.com/odoo/invoices/42",
+                            "title": "Invoice INV/2026/0042",
+                            "status": "imported",
+                        }
+                    ],
                 }
             ).encode(),
         )

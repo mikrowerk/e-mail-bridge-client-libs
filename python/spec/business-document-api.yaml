@@ -14,7 +14,7 @@ info:
     Fields marked `writeOnly` (tenant `attachment_store_secrets`; mailbox
     credential `credentials`; action `auth_credentials`) are accepted on
     write but never returned in any response.
-  version: 0.11.0
+  version: 0.12.0
 
 servers:
   - url: localhost:8080/api/v1
@@ -3017,8 +3017,30 @@ components:
 
     ConsumerStatusValue:
       type: string
-      enum: [imported, failed, skipped]
-      description: Outcome an external consumer reports for a message.
+      enum: [imported, failed, skipped, related]
+      description: >-
+        Outcome an external consumer reports for a message. `related` means the
+        message was matched to an existing record in the external system rather
+        than imported as a new one.
+
+    BacklinkStatus:
+      type: string
+      enum: [imported, related]
+      description: Whether the linked external record was created by the import or already existed.
+
+    ConsumerStatusBacklink:
+      type: object
+      required: [url, status]
+      properties:
+        url:
+          type: string
+          minLength: 1
+          description: Hyperlink to the record in the external system.
+        title:
+          type: string
+          description: Optional human-readable link label.
+        status:
+          $ref: '#/components/schemas/BacklinkStatus'
 
     ConsumerStatusCreate:
       type: object
@@ -3032,10 +3054,15 @@ components:
           description: Free-text category of the reporting consumer, supplied by the client (e.g. "odoo-email-bridge").
         status:
           $ref: '#/components/schemas/ConsumerStatusValue'
+        backlinks:
+          type: array
+          description: Optional hyperlinks to the imported or related records in the external system.
+          items:
+            $ref: '#/components/schemas/ConsumerStatusBacklink'
 
     ConsumerStatusResponse:
       type: object
-      required: [id, tenant_id, message_id, mailbox_id, consumer_name, consumer_type, status, created_by_user_id, created_at]
+      required: [id, tenant_id, message_id, mailbox_id, consumer_name, consumer_type, status, backlinks, created_by_user_id, created_at]
       properties:
         id:
           type: string
@@ -3056,6 +3083,11 @@ components:
           type: string
         status:
           $ref: '#/components/schemas/ConsumerStatusValue'
+        backlinks:
+          type: array
+          description: Hyperlinks to the imported or related records in the external system; empty when none were reported.
+          items:
+            $ref: '#/components/schemas/ConsumerStatusBacklink'
         created_by_user_id:
           type: string
           format: uuid

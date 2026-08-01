@@ -12,10 +12,12 @@ from .exceptions import (
     TransportError,
 )
 from .models import (
+    BACKLINK_STATUS_VALUES,
     CONSUMER_STATUS_VALUES,
     Attachment,
     AttachmentContent,
     AttachmentSummary,
+    Backlink,
     ClassificationEntry,
     ConsumerStatus,
     MessageDetail,
@@ -30,9 +32,10 @@ from .webhook import is_test_mode, parse_webhook_payload, verify_bearer_token
 __version__ = "0.1.0"
 
 #: API spec version this release was verified against (spec/business-document-api.yaml).
-SPEC_VERSION = "0.11.0"
+SPEC_VERSION = "0.12.0"
 
 __all__ = [
+    "BACKLINK_STATUS_VALUES",
     "CONSUMER_STATUS_VALUES",
     "DEFAULT_TIMEOUT",
     "SPEC_VERSION",
@@ -41,6 +44,7 @@ __all__ = [
     "AttachmentContent",
     "AttachmentSummary",
     "AuthenticationError",
+    "Backlink",
     "ClassificationEntry",
     "ConsumerStatus",
     "ForbiddenError",

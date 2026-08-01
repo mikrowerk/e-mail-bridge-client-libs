@@ -27,9 +27,11 @@ from .exceptions import (
     TransportError,
 )
 from .models import (
+    BACKLINK_STATUS_VALUES,
     CONSUMER_STATUS_VALUES,
     Attachment,
     AttachmentContent,
+    Backlink,
     ConsumerStatus,
     MessageDetail,
     ParsedDocument,
@@ -184,18 +186,36 @@ class IngestionClient:
         *,
         consumer_name: str,
         consumer_type: str = "odoo-email-bridge",
+        backlinks: list[Backlink] | tuple[Backlink, ...] | None = None,
     ) -> ConsumerStatus:
         """``POST /messages/{messageId}/consumer_status`` — report the outcome.
 
-        ``status`` must be one of ``imported``, ``failed``, ``skipped``.
+        ``status`` must be one of ``imported``, ``failed``, ``skipped``,
+        ``related``. ``backlinks`` optionally points to the imported or
+        related records in the external system.
         Not retried automatically (append-only audit log).
         """
         if status not in CONSUMER_STATUS_VALUES:
             raise ValueError(f"status must be one of {CONSUMER_STATUS_VALUES}, got {status!r}")
+        body: dict[str, Any] = {
+            "consumer_name": consumer_name,
+            "consumer_type": consumer_type,
+            "status": status,
+        }
+        if backlinks is not None:
+            for i, b in enumerate(backlinks):
+                if not b.url:
+                    raise ValueError(f"backlinks[{i}]: url must be non-empty")
+                if b.status not in BACKLINK_STATUS_VALUES:
+                    raise ValueError(
+                        f"backlinks[{i}]: status must be one of "
+                        f"{BACKLINK_STATUS_VALUES}, got {b.status!r}"
+                    )
+            body["backlinks"] = [b.to_dict() for b in backlinks]
         resp = self._request(
             "POST",
             f"/messages/{_seg(message_id)}/consumer_status",
-            json={"consumer_name": consumer_name, "consumer_type": consumer_type, "status": status},
+            json=body,
         )
         return ConsumerStatus.from_dict(resp.json())
 

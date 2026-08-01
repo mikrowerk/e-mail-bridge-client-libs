@@ -144,6 +144,14 @@ def consumer_status_payload() -> dict:
         "consumer_name": "odoo-prod",
         "consumer_type": "odoo-email-bridge",
         "status": "imported",
+        "backlinks": [
+            {
+                "url": "https://odoo.example.com/odoo/invoices/42",
+                "title": "Invoice INV/2026/0042",
+                "status": "imported",
+            },
+            {"url": "https://odoo.example.com/odoo/contacts/7", "status": "related"},
+        ],
         "created_by_user_id": "9d1e4b6f-7a25-49c8-8d3b-5e0c7f2a1004",
         "created_at": "2026-07-27T10:20:00Z",
     }

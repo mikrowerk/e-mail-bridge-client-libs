@@ -8,6 +8,7 @@ from conftest import BASE_URL, MESSAGE_ID, TOKEN
 from email_bridge_client import (
     ApiError,
     AuthenticationError,
+    Backlink,
     ForbiddenError,
     IngestionClient,
     NotFoundError,
@@ -156,9 +157,50 @@ class TestConsumerStatus:
             "status": "imported",
         }
 
+    @responses.activate
+    def test_report_status_posts_backlinks(
+        self, client: IngestionClient, consumer_status_payload: dict
+    ):
+        rsp = responses.post(f"{MSG_URL}/consumer_status", json=consumer_status_payload, status=201)
+        cs = client.report_status(
+            MESSAGE_ID,
+            "related",
+            consumer_name="odoo-prod",
+            backlinks=[
+                Backlink(url="https://odoo.example.com/odoo/invoices/42", status="related"),
+            ],
+        )
+        assert cs.backlinks
+        import json
+
+        assert json.loads(rsp.calls[0].request.body) == {
+            "consumer_name": "odoo-prod",
+            "consumer_type": "odoo-email-bridge",
+            "status": "related",
+            "backlinks": [
+                {"url": "https://odoo.example.com/odoo/invoices/42", "status": "related"},
+            ],
+        }
+
     def test_report_status_rejects_unknown_value(self, client: IngestionClient):
         with pytest.raises(ValueError):
             client.report_status(MESSAGE_ID, "pending", consumer_name="odoo-prod")
+
+    def test_report_status_rejects_bad_backlink(self, client: IngestionClient):
+        with pytest.raises(ValueError, match=r"backlinks\[0\]: url"):
+            client.report_status(
+                MESSAGE_ID,
+                "imported",
+                consumer_name="odoo-prod",
+                backlinks=[Backlink(url="", status="imported")],
+            )
+        with pytest.raises(ValueError, match=r"backlinks\[0\]: status"):
+            client.report_status(
+                MESSAGE_ID,
+                "imported",
+                consumer_name="odoo-prod",
+                backlinks=[Backlink(url="https://x/1", status="failed")],
+            )
 
     @responses.activate
     def test_list_consumer_status(self, client: IngestionClient, consumer_status_payload: dict):

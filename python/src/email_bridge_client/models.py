@@ -308,7 +308,32 @@ class ParsedDocument:
 
 
 #: Status values accepted by ``report_status`` (spec: ConsumerStatusValue).
-CONSUMER_STATUS_VALUES = ("imported", "failed", "skipped")
+#: ``related`` means the message was matched to an existing record in the
+#: external system rather than imported as a new one.
+CONSUMER_STATUS_VALUES = ("imported", "failed", "skipped", "related")
+
+#: Per-backlink status values (spec: BacklinkStatus).
+BACKLINK_STATUS_VALUES = ("imported", "related")
+
+
+@dataclass(frozen=True, slots=True)
+class Backlink:
+    """Hyperlink to the record a consumer imported or matched in the external
+    system (spec: ConsumerStatusBacklink)."""
+
+    url: str
+    status: str
+    title: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Backlink:
+        return cls(url=d["url"], status=d["status"], title=d.get("title"))
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"url": self.url, "status": self.status}
+        if self.title is not None:
+            out["title"] = self.title
+        return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,6 +349,7 @@ class ConsumerStatus:
     status: str
     created_by_user_id: str
     created_at: datetime
+    backlinks: tuple[Backlink, ...] = ()
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> ConsumerStatus:
@@ -337,4 +363,5 @@ class ConsumerStatus:
             status=d["status"],
             created_by_user_id=d["created_by_user_id"],
             created_at=_parse_datetime(d["created_at"]),
+            backlinks=tuple(Backlink.from_dict(b) for b in d.get("backlinks") or ()),
         )
