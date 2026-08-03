@@ -183,8 +183,68 @@ class MessageStageResult:
 
 
 @dataclass(frozen=True, slots=True)
+class MessageSummary:
+    """Abbreviated message record (spec: MessageResponse) as returned by list
+    endpoints such as ``GET /messages/{messageId}/thread``.
+
+    ``thread_id`` groups the messages of one conversation; it equals the id
+    of the thread's root message, and a standalone message is a thread of
+    size 1 (``thread_id == id``). ``is_thread`` is True when the message
+    belongs to a thread with more than one ingested member (spec 0.14.0).
+    """
+
+    id: str
+    tenant_id: str
+    mailbox_id: str
+    source: str
+    received_at: datetime
+    from_: str
+    subject: str
+    pipeline_status: str
+    external_msg_id: str | None = None
+    to: list[str] = field(default_factory=list)
+    is_forwarded: bool = False
+    original_from: str | None = None
+    attachment_count: int = 0
+    deleted_at: datetime | None = None
+    classifications: list[ClassificationEntry] = field(default_factory=list)
+    is_thread: bool = False
+    thread_id: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> MessageSummary:
+        return cls(
+            id=d["id"],
+            tenant_id=d["tenant_id"],
+            mailbox_id=d["mailbox_id"],
+            source=d["source"],
+            received_at=_parse_datetime(d["received_at"]),
+            from_=d["from"],
+            subject=d["subject"],
+            pipeline_status=d["pipeline_status"],
+            external_msg_id=d.get("external_msg_id"),
+            to=list(d.get("to") or []),
+            is_forwarded=d.get("is_forwarded", False),
+            original_from=d.get("original_from"),
+            attachment_count=d.get("attachment_count", 0),
+            deleted_at=_parse_datetime(d.get("deleted_at")),
+            classifications=[
+                ClassificationEntry.from_dict(x) for x in d.get("classifications") or []
+            ],
+            is_thread=d.get("is_thread", False),
+            thread_id=d.get("thread_id"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class MessageDetail:
-    """Full message detail (``GET /messages/{messageId}``)."""
+    """Full message detail (``GET /messages/{messageId}``).
+
+    The thread/correlation fields (spec 0.14.0) let a consumer group
+    messages by conversation (``thread_id``) or correlate them against its
+    own mail archive via the RFC 5322 identifiers (``message_id_hdr``,
+    ``in_reply_to``, ``references``).
+    """
 
     id: str
     tenant_id: str
@@ -208,6 +268,13 @@ class MessageDetail:
     classifications: list[ClassificationEntry] = field(default_factory=list)
     attachments: list[AttachmentSummary] = field(default_factory=list)
     stage_result: MessageStageResult | None = None
+    is_thread: bool = False
+    thread_id: str | None = None
+    message_id_hdr: str | None = None
+    in_reply_to: str | None = None
+    references: list[str] = field(default_factory=list)
+    provider_thread_id: str | None = None
+    parent_id: str | None = None
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> MessageDetail:
@@ -239,6 +306,13 @@ class MessageDetail:
             stage_result=(
                 MessageStageResult.from_dict(stage_result) if stage_result is not None else None
             ),
+            is_thread=d.get("is_thread", False),
+            thread_id=d.get("thread_id"),
+            message_id_hdr=d.get("message_id_hdr"),
+            in_reply_to=d.get("in_reply_to"),
+            references=list(d.get("references") or []),
+            provider_thread_id=d.get("provider_thread_id"),
+            parent_id=d.get("parent_id"),
         )
 
 
@@ -616,6 +690,40 @@ class Backlink:
         if self.title is not None:
             out["title"] = self.title
         return out
+
+
+@dataclass(frozen=True, slots=True)
+class ClientConfig:
+    """OIDC client configuration from the public discovery endpoint
+    ``GET /.well-known/client-config`` (spec 0.14.0: ClientConfigResponse).
+
+    ``scope`` is composed server-side from the configured audience — use it
+    verbatim when requesting tokens. All OIDC fields are ``None`` when
+    ``auth_provider_type`` is ``"local_jwt"`` (no OIDC provider configured).
+    """
+
+    auth_provider_type: str
+    issuer: str | None = None
+    token_endpoint: str | None = None
+    grant_type: str | None = None
+    audience: str | None = None
+    scope: str | None = None
+
+    @property
+    def is_remote(self) -> bool:
+        """True when the server validates tokens against an OIDC provider."""
+        return self.auth_provider_type == "remote"
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> ClientConfig:
+        return cls(
+            auth_provider_type=d["auth_provider_type"],
+            issuer=d.get("issuer"),
+            token_endpoint=d.get("token_endpoint"),
+            grant_type=d.get("grant_type"),
+            audience=d.get("audience"),
+            scope=d.get("scope"),
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -132,3 +132,28 @@ class TestResponseContracts:
             _get(f"/messages/{MESSAGE_ID}"),
             _json_response(error_payload, status=404),
         )
+
+    def test_thread_list(self, openapi: OpenAPI, thread_payload: list[dict]):
+        openapi.validate_response(
+            _get(f"/messages/{MESSAGE_ID}/thread"),
+            _json_response(thread_payload),
+        )
+
+    def test_client_config(self, openapi: OpenAPI, client_config_payload: dict):
+        # The discovery endpoint is public (security: []) — no Authorization
+        # header on the request.
+        request = MockRequest(
+            host_url=HOST_URL,
+            method="GET",
+            path=f"{PREFIX}/.well-known/client-config",
+        )
+        openapi.validate_request(request)
+        openapi.validate_response(request, _json_response(client_config_payload))
+
+    def test_client_config_local_jwt(self, openapi: OpenAPI):
+        request = MockRequest(
+            host_url=HOST_URL,
+            method="GET",
+            path=f"{PREFIX}/.well-known/client-config",
+        )
+        openapi.validate_response(request, _json_response({"auth_provider_type": "local_jwt"}))

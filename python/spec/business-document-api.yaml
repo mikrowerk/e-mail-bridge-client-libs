@@ -14,7 +14,7 @@ info:
     Fields marked `writeOnly` (tenant `attachment_store_secrets`; mailbox
     credential `credentials`; action `auth_credentials`) are accepted on
     write but never returned in any response.
-  version: 0.13.0
+  version: 0.14.0
 
 servers:
   - url: localhost:8080/api/v1
@@ -49,11 +49,39 @@ tags:
     description: Role grant/revoke for users and service accounts — requires role `global_tenant_admin` or `tenant_admin`
   - name: IdentityProviders
     description: Tenant-level federated identity provider management — requires role `global_tenant_admin`
+  - name: Discovery
+    description: Public, unauthenticated client-configuration discovery — no secrets exposed
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Paths
 # ──────────────────────────────────────────────────────────────────────────────
 paths:
+
+  # ── Discovery ───────────────────────────────────────────────────────────────
+
+  /.well-known/client-config:
+    get:
+      tags: [Discovery]
+      operationId: getClientConfig
+      summary: OIDC client configuration for external API consumers
+      description: |
+        Publishes the values an external consumer (e.g. the Odoo bridge) needs
+        to obtain API access tokens: issuer, token endpoint, grant type,
+        audience (Zitadel project ID) and the exact scope string. The scope is
+        composed server-side from the configured audience — consumers must use
+        it verbatim. Public by design: none of these values is a secret (the
+        issuer is public, the project ID appears in every issued token).
+        In local_jwt mode only auth_provider_type is returned.
+      security: []
+      responses:
+        '200':
+          description: Client configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientConfigResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   # ── Tenants ─────────────────────────────────────────────────────────────────
 
@@ -2359,6 +2387,37 @@ components:
 
   # ── Schemas ──────────────────────────────────────────────────────────────────
   schemas:
+
+    # ── Discovery ───────────────────────────────────────────────────────────────
+
+    ClientConfigResponse:
+      type: object
+      description: >
+        Client configuration for external API consumers. All OIDC fields are
+        absent when auth_provider_type is "local_jwt".
+      required: [auth_provider_type]
+      properties:
+        auth_provider_type:
+          type: string
+          enum: [remote, local_jwt]
+          description: Token validation mode of this server.
+        issuer:
+          type: string
+          description: OIDC issuer base URL (Zitadel).
+        token_endpoint:
+          type: string
+          description: OAuth2 token endpoint (issuer + /oauth/v2/token).
+        grant_type:
+          type: string
+          description: Grant type for service accounts (JWT bearer profile).
+        audience:
+          type: string
+          description: Zitadel project ID expected in the token's aud claim.
+        scope:
+          type: string
+          description: >
+            Exact scope string to request — composed server-side, use
+            verbatim.
 
     # ── Common ──────────────────────────────────────────────────────────────────
 

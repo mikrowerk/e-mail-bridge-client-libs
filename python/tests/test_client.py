@@ -14,6 +14,7 @@ from email_bridge_client import (
     NotFoundError,
     ServerError,
     TransportError,
+    fetch_client_config,
 )
 
 MSG_URL = f"{BASE_URL}/messages/{MESSAGE_ID}"
@@ -138,6 +139,50 @@ class TestEndpoints:
         content = client.download_attachment(MESSAGE_ID, 7)
         assert content.filename is None
         assert content.content == b"bytes"
+
+    @responses.activate
+    def test_list_thread(self, client: IngestionClient, thread_payload: list[dict]):
+        responses.get(f"{MSG_URL}/thread", json=thread_payload)
+        members = client.list_thread(MESSAGE_ID)
+        assert len(members) == 2
+        assert members[0].id == members[0].thread_id  # thread root first
+        assert all(m.thread_id == members[0].thread_id for m in members)
+        assert members[1].id == MESSAGE_ID and members[1].is_thread
+
+
+class TestDiscovery:
+    @responses.activate
+    def test_get_client_config(self, client: IngestionClient, client_config_payload: dict):
+        responses.get(f"{BASE_URL}/.well-known/client-config", json=client_config_payload)
+        cfg = client.get_client_config()
+        assert cfg.is_remote
+        assert cfg.audience in cfg.scope
+
+    @responses.activate
+    def test_fetch_client_config_needs_no_token(self, client_config_payload: dict):
+        responses.get(f"{BASE_URL}/.well-known/client-config", json=client_config_payload)
+        cfg = fetch_client_config(BASE_URL)
+        assert cfg.token_endpoint == "https://auth.test/oauth/v2/token"
+        assert "Authorization" not in responses.calls[0].request.headers
+
+    @responses.activate
+    def test_fetch_client_config_local_jwt(self):
+        responses.get(
+            f"{BASE_URL}/.well-known/client-config",
+            json={"auth_provider_type": "local_jwt"},
+        )
+        cfg = fetch_client_config(BASE_URL)
+        assert not cfg.is_remote
+        assert cfg.scope is None and cfg.token_endpoint is None
+
+    @responses.activate
+    def test_fetch_client_config_transport_error(self):
+        responses.get(
+            f"{BASE_URL}/.well-known/client-config",
+            body=requests.ConnectionError("boom"),
+        )
+        with pytest.raises(TransportError):
+            fetch_client_config(BASE_URL)
 
 
 class TestConsumerStatus:

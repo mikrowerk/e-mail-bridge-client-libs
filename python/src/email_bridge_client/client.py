@@ -32,8 +32,10 @@ from .models import (
     Attachment,
     AttachmentContent,
     Backlink,
+    ClientConfig,
     ConsumerStatus,
     MessageDetail,
+    MessageSummary,
     ParsedDocument,
 )
 
@@ -141,6 +143,14 @@ class IngestionClient:
         """``GET /messages/{messageId}`` — full message detail."""
         return MessageDetail.from_dict(self._get_json(f"/messages/{_seg(message_id)}"))
 
+    def list_thread(self, message_id: str) -> list[MessageSummary]:
+        """``GET /messages/{messageId}/thread`` — all messages of the
+        conversation this message belongs to, oldest first (thread root
+        first). A standalone message yields a single-element list.
+        """
+        items = self._get_json(f"/messages/{_seg(message_id)}/thread")
+        return [MessageSummary.from_dict(x) for x in items]
+
     def list_parsed_documents(self, message_id: str) -> list[ParsedDocument]:
         """``GET /messages/{messageId}/parsed-documents``."""
         items = self._get_json(f"/messages/{_seg(message_id)}/parsed-documents")
@@ -224,6 +234,16 @@ class IngestionClient:
         items = self._get_json(f"/messages/{_seg(message_id)}/consumer_status")
         return [ConsumerStatus.from_dict(x) for x in items]
 
+    # ── discovery ─────────────────────────────────────────────────────────
+
+    def get_client_config(self) -> ClientConfig:
+        """``GET /.well-known/client-config`` — OIDC client configuration.
+
+        The endpoint is public; see :func:`fetch_client_config` for calling
+        it before a token is available.
+        """
+        return ClientConfig.from_dict(self._get_json("/.well-known/client-config"))
+
     # ── internals ─────────────────────────────────────────────────────────
 
     def _get_json(self, path: str) -> Any:
@@ -259,3 +279,34 @@ class IngestionClient:
 def _seg(value: str) -> str:
     """Quote a value for safe use as a single URL path segment."""
     return quote(str(value), safe="")
+
+
+def fetch_client_config(
+    base_url: str,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+    session: requests.Session | None = None,
+) -> ClientConfig:
+    """Fetch ``GET {base_url}/.well-known/client-config`` without a token.
+
+    The discovery endpoint is public by design, so a consumer can obtain the
+    token endpoint, audience and exact scope string *before* it has any
+    credentials — the intended bootstrap for self-configuration (see the
+    server repo's ``.features/.specs/odoo-client-config-discovery.md``).
+
+    Args:
+        base_url: API base including the version prefix,
+            e.g. ``"https://host/api/v1"``.
+        timeout: Per-request timeout in seconds.
+        session: Optional :class:`requests.Session`; a one-shot request is
+            made when omitted.
+    """
+    url = base_url.rstrip("/") + "/.well-known/client-config"
+    http = session if session is not None else requests
+    try:
+        resp = http.get(url, timeout=timeout)
+    except requests.RequestException as exc:
+        raise TransportError(f"GET /.well-known/client-config: {exc}") from exc
+    if not resp.ok:
+        IngestionClient._raise_api_error("GET", "/.well-known/client-config", resp)
+    return ClientConfig.from_dict(resp.json())

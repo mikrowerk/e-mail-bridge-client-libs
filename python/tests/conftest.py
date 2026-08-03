@@ -20,6 +20,7 @@ TOKEN = "test-token"
 MESSAGE_ID = "01890a5d-ac96-774b-bcce-b302099a8057"
 TENANT_ID = "3f9c68e2-14f0-4c1f-9d3e-6a1f6f11a001"
 MAILBOX_ID = "b7a2f0c4-52d1-4c8e-8f0a-9c7e2d5b1002"
+THREAD_ID = "01890a5d-0000-774b-bcce-b302099a8000"
 
 
 @pytest.fixture
@@ -50,6 +51,13 @@ def message_detail_payload() -> dict:
         "pipeline_status": "processed",
         "is_forwarded": False,
         "attachment_count": 1,
+        "is_thread": True,
+        "thread_id": THREAD_ID,
+        "message_id_hdr": "reply-1@supplier.example",
+        "in_reply_to": "root@supplier.example",
+        "references": ["root@supplier.example"],
+        "provider_thread_id": "AAQkAGconv1",
+        "parent_id": THREAD_ID,
         "classifications": [
             {
                 "part": 0,
@@ -154,6 +162,55 @@ def consumer_status_payload() -> dict:
         ],
         "created_by_user_id": "9d1e4b6f-7a25-49c8-8d3b-5e0c7f2a1004",
         "created_at": "2026-07-27T10:20:00Z",
+    }
+
+
+@pytest.fixture(scope="session")
+def thread_payload() -> list[dict]:
+    """Thread members (spec: MessageResponse[]), oldest first; the second
+    entry is the message from ``message_detail_payload``."""
+    return [
+        {
+            "id": THREAD_ID,
+            "tenant_id": TENANT_ID,
+            "mailbox_id": MAILBOX_ID,
+            "source": "imap",
+            "received_at": "2026-07-26T09:00:00Z",
+            "from": "customer@example.com",
+            "subject": "Request 2026-0815",
+            "pipeline_status": "processed",
+            "is_thread": True,
+            "thread_id": THREAD_ID,
+        },
+        {
+            "id": MESSAGE_ID,
+            "tenant_id": TENANT_ID,
+            "mailbox_id": MAILBOX_ID,
+            "source": "imap",
+            "received_at": "2026-07-27T10:15:00Z",
+            "from": "supplier@example.com",
+            "to": ["inbox@customer.example"],
+            "subject": "Invoice 2026-0815",
+            "pipeline_status": "processed",
+            "attachment_count": 1,
+            "is_thread": True,
+            "thread_id": THREAD_ID,
+        },
+    ]
+
+
+@pytest.fixture(scope="session")
+def client_config_payload() -> dict:
+    return {
+        "auth_provider_type": "remote",
+        "issuer": "https://auth.test",
+        "token_endpoint": "https://auth.test/oauth/v2/token",
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "audience": "377549952068354051",
+        "scope": (
+            "openid urn:zitadel:iam:org:project:id:377549952068354051:aud "
+            "urn:zitadel:iam:org:projects:roles"
+        ),
     }
 
 

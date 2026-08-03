@@ -3,7 +3,14 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from email_bridge_client import Backlink, ConsumerStatus, MessageDetail, ParsedDocument
+from email_bridge_client import (
+    Backlink,
+    ClientConfig,
+    ConsumerStatus,
+    MessageDetail,
+    MessageSummary,
+    ParsedDocument,
+)
 
 
 class TestMessageDetail:
@@ -18,6 +25,16 @@ class TestMessageDetail:
         assert m.stage_result.classification.stage_metadata.llm_input_tokens == 1200
         assert m.stage_result.documents[0].document_date == date(2026, 7, 20)
         assert m.stage_result.documents[0].document_type_code == "380"
+
+    def test_thread_and_correlation_fields(self, message_detail_payload: dict):
+        m = MessageDetail.from_dict(message_detail_payload)
+        assert m.is_thread
+        assert m.thread_id == message_detail_payload["thread_id"]
+        assert m.parent_id == message_detail_payload["thread_id"]
+        assert m.message_id_hdr == "reply-1@supplier.example"
+        assert m.in_reply_to == "root@supplier.example"
+        assert m.references == ["root@supplier.example"]
+        assert m.provider_thread_id == "AAQkAGconv1"
 
     def test_minimal_payload_only_required_fields(self):
         m = MessageDetail.from_dict(
@@ -35,6 +52,9 @@ class TestMessageDetail:
         assert m.to == [] and m.cc == [] and m.attachments == []
         assert m.stage_result is None and m.deleted_at is None
         assert m.received_at.tzinfo is not None
+        # Pre-0.14.0 servers: thread fields default to standalone semantics.
+        assert m.is_thread is False and m.thread_id is None
+        assert m.references == []
 
     def test_unknown_fields_ignored(self, message_detail_payload: dict):
         payload = {**message_detail_payload, "added_in_future_spec": {"x": 1}}
@@ -161,3 +181,38 @@ class TestBacklink:
             "status": "imported",
             "title": "Rec",
         }
+
+
+class TestMessageSummary:
+    def test_thread_member(self, thread_payload: list[dict]):
+        root = MessageSummary.from_dict(thread_payload[0])
+        assert root.is_thread and root.thread_id == root.id
+        assert root.received_at.tzinfo is not None
+
+    def test_minimal_without_thread_fields(self):
+        m = MessageSummary.from_dict(
+            {
+                "id": "x",
+                "tenant_id": "t",
+                "mailbox_id": "m",
+                "source": "gmail",
+                "received_at": "2026-07-27T10:15:00Z",
+                "from": "a@b.c",
+                "subject": "s",
+                "pipeline_status": "stored",
+            }
+        )
+        assert m.is_thread is False and m.thread_id is None
+
+
+class TestClientConfig:
+    def test_remote(self, client_config_payload: dict):
+        cfg = ClientConfig.from_dict(client_config_payload)
+        assert cfg.is_remote
+        assert cfg.grant_type == "urn:ietf:params:oauth:grant-type:jwt-bearer"
+        assert cfg.audience in cfg.scope
+
+    def test_local_jwt_reduction(self):
+        cfg = ClientConfig.from_dict({"auth_provider_type": "local_jwt"})
+        assert not cfg.is_remote
+        assert cfg.issuer is None and cfg.scope is None and cfg.audience is None

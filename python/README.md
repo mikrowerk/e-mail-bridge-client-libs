@@ -15,6 +15,11 @@ fetch the parsed e-mail and its attachments, report the import outcome.
   are faithful XML parses, `llm-*` documents are best-effort extractions —
   apply your own validation before booking. A paid invoice carries the
   deterministic `[PAID]` suffix on `payment_terms` (`BusinessDocument.is_paid`).
+- Since spec 0.14.0 messages carry **thread fields** (`thread_id` groups a
+  conversation; `message_id_hdr`/`in_reply_to`/`references` for own
+  correlation), `client.list_thread(uuid)` returns all members of a
+  conversation, and the public **discovery endpoint** provides the OAuth
+  client configuration (`fetch_client_config`, see below).
 
 ## Install
 
@@ -65,6 +70,41 @@ with IngestionClient("https://host/api/v1", token=PAT) as client:
 `token` is a personal access token of a service account with role
 `mailbox_user`. All errors derive from `IngestionClientError`
 (`ApiError` with `status_code`/`body`, or `TransportError`).
+
+### E-mail threads
+
+A reply usually quotes the whole prior conversation. Use the thread fields to
+avoid importing the same content once per reply — e.g. import the newest
+member and mark the older ones `related`:
+
+```python
+message = client.get_message(uuid)
+if message.is_thread:
+    members = client.list_thread(uuid)            # oldest first, all mailboxes of the tenant
+    newest = members[-1]
+    if message.id != newest.id:
+        client.report_status(uuid, "related", consumer_name="odoo-prod",
+                             backlinks=[...])     # link to the record of the thread root
+```
+
+### Discovering the OAuth client configuration
+
+The server publishes the values needed to obtain API tokens (token endpoint,
+grant type, audience, the exact scope string) on a **public** endpoint — no
+token required, ideal for bootstrap/self-configuration:
+
+```python
+from email_bridge_client import fetch_client_config
+
+cfg = fetch_client_config("https://host/api/v1")
+if cfg.is_remote:
+    request_token(cfg.token_endpoint, grant_type=cfg.grant_type, scope=cfg.scope)
+```
+
+Use `cfg.scope` verbatim — it is composed server-side from the configured
+audience (see the server repo's
+`.features/.specs/odoo-client-config-discovery.md` for the recommended
+caching / 401-self-healing behaviour in Odoo).
 
 ## Development
 

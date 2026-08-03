@@ -1,6 +1,6 @@
 """Python client for the E-Mail-Bridge (AI Documents Ingestion) REST API."""
 
-from .client import DEFAULT_TIMEOUT, IngestionClient, RetryConfig
+from .client import DEFAULT_TIMEOUT, IngestionClient, RetryConfig, fetch_client_config
 from .exceptions import (
     ApiError,
     AuthenticationError,
@@ -26,9 +26,11 @@ from .models import (
     BusinessPrice,
     BusinessTaxCategory,
     ClassificationEntry,
+    ClientConfig,
     ConsumerStatus,
     MessageDetail,
     MessageStageResult,
+    MessageSummary,
     MonetaryTotal,
     ParsedDocument,
     StageMetadataInfo,
@@ -38,10 +40,10 @@ from .models import (
 )
 from .webhook import is_test_mode, parse_webhook_payload, verify_bearer_token
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 #: API spec version this release was verified against (spec/business-document-api.yaml).
-SPEC_VERSION = "0.13.0"
+SPEC_VERSION = "0.14.0"
 
 __all__ = [
     "BACKLINK_STATUS_VALUES",
@@ -62,6 +64,7 @@ __all__ = [
     "BusinessPrice",
     "BusinessTaxCategory",
     "ClassificationEntry",
+    "ClientConfig",
     "ConsumerStatus",
     "ForbiddenError",
     "IngestionClient",
@@ -69,6 +72,7 @@ __all__ = [
     "InvalidWebhookPayload",
     "MessageDetail",
     "MessageStageResult",
+    "MessageSummary",
     "MonetaryTotal",
     "NotFoundError",
     "ParsedDocument",
@@ -79,6 +83,7 @@ __all__ = [
     "StageResultDocument",
     "TaxSubtotal",
     "TransportError",
+    "fetch_client_config",
     "is_test_mode",
     "parse_webhook_payload",
     "verify_bearer_token",
