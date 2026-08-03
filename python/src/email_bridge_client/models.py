@@ -6,8 +6,11 @@ compatibility with newer spec versions. Timestamps are parsed to
 timezone-aware :class:`datetime.datetime`.
 
 The spec source of truth is ``spec/business-document-api.yaml`` (validated by
-the contract tests); the ``ParsedDocument.data`` payload is deliberately
-untyped there, so it stays a plain ``dict``/``str`` here.
+the contract tests). Since spec 0.13.0 the ``ParsedDocument.data`` payload of
+JSON records is the canonical :class:`BusinessDocument` schema (EN 16931) —
+``ParsedDocument.data`` stays the raw ``dict`` and
+:meth:`ParsedDocument.business_document` returns the typed view with monetary
+amounts as :class:`decimal.Decimal`.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 
@@ -29,6 +33,16 @@ def _parse_date(value: str | None) -> date | None:
     if value is None:
         return None
     return date.fromisoformat(value)
+
+
+def _parse_decimal(value: Any) -> Decimal | None:
+    """Parse a decimal amount; the API encodes decimals as JSON strings."""
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except InvalidOperation:
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,9 +276,267 @@ class AttachmentContent:
     mime_type: str | None
 
 
+#: DocumentSource values (spec: DocumentSource). ``xml-*`` sources are
+#: faithful EN 16931 representations; ``llm-*`` sources are best-effort
+#: extractions — apply your own validation before booking.
+DOCUMENT_SOURCE_VALUES = ("xml-cii", "xml-ubl", "xml-zugferd", "llm-pdf", "llm-body")
+
+#: Deterministic token appended to ``BusinessDocument.payment_terms`` when the
+#: source document was marked as paid (LLM sources only).
+PAID_TOKEN = "[PAID]"
+
+
+@dataclass(frozen=True, slots=True)
+class BusinessParty:
+    """A trading partner — seller or buyer (spec: BusinessParty)."""
+
+    name: str | None = None
+    street_name: str | None = None
+    postal_zone: str | None = None
+    city_name: str | None = None
+    country_code: str | None = None
+    vat_id: str | None = None
+    tax_registration_id: str | None = None
+    company_registration_id: str | None = None
+    electronic_mail: str | None = None
+    telephone: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> BusinessParty:
+        return cls(
+            name=d.get("name"),
+            street_name=d.get("street_name"),
+            postal_zone=d.get("postal_zone"),
+            city_name=d.get("city_name"),
+            country_code=d.get("country_code"),
+            vat_id=d.get("vat_id"),
+            tax_registration_id=d.get("tax_registration_id"),
+            company_registration_id=d.get("company_registration_id"),
+            electronic_mail=d.get("electronic_mail"),
+            telephone=d.get("telephone"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BusinessPrice:
+    """Unit price information (spec: BusinessPrice)."""
+
+    item_net_price: Decimal | None = None
+    base_quantity: Decimal | None = None
+    base_quantity_unit_code: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> BusinessPrice:
+        return cls(
+            item_net_price=_parse_decimal(d.get("item_net_price")),
+            base_quantity=_parse_decimal(d.get("base_quantity")),
+            base_quantity_unit_code=d.get("base_quantity_unit_code"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BusinessTaxCategory:
+    """VAT category of a line or totals row (spec: BusinessTaxCategory)."""
+
+    id: str | None = None
+    percent: Decimal | None = None
+    tax_scheme_id: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> BusinessTaxCategory:
+        return cls(
+            id=d.get("id"),
+            percent=_parse_decimal(d.get("percent")),
+            tax_scheme_id=d.get("tax_scheme_id"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BusinessDocumentLine:
+    """A single line item (spec: BusinessDocumentLine)."""
+
+    id: str | None = None
+    item_name: str | None = None
+    description: str | None = None
+    invoiced_quantity: Decimal | None = None
+    unit_code: str | None = None
+    standard_item_identification: str | None = None
+    sellers_item_identification: str | None = None
+    buyers_item_identification: str | None = None
+    order_line_reference: str | None = None
+    project_reference_line: str | None = None
+    price: BusinessPrice | None = None
+    allowance_charge_amount: Decimal | None = None
+    line_extension_amount: Decimal | None = None
+    total_amount: Decimal | None = None
+    classified_tax_category: BusinessTaxCategory | None = None
+    vat_amount: Decimal | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> BusinessDocumentLine:
+        price = d.get("price")
+        tax = d.get("classified_tax_category")
+        return cls(
+            id=d.get("id"),
+            item_name=d.get("item_name"),
+            description=d.get("description"),
+            invoiced_quantity=_parse_decimal(d.get("invoiced_quantity")),
+            unit_code=d.get("unit_code"),
+            standard_item_identification=d.get("standard_item_identification"),
+            sellers_item_identification=d.get("sellers_item_identification"),
+            buyers_item_identification=d.get("buyers_item_identification"),
+            order_line_reference=d.get("order_line_reference"),
+            project_reference_line=d.get("project_reference_line"),
+            price=BusinessPrice.from_dict(price) if price is not None else None,
+            allowance_charge_amount=_parse_decimal(d.get("allowance_charge_amount")),
+            line_extension_amount=_parse_decimal(d.get("line_extension_amount")),
+            total_amount=_parse_decimal(d.get("total_amount")),
+            classified_tax_category=(
+                BusinessTaxCategory.from_dict(tax) if tax is not None else None
+            ),
+            vat_amount=_parse_decimal(d.get("vat_amount")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TaxSubtotal:
+    """One row of the document-level VAT breakdown (spec: TaxSubtotal)."""
+
+    tax_category_id: str | None = None
+    tax_category_percent: Decimal | None = None
+    tax_scheme_id: str | None = None
+    taxable_amount: Decimal | None = None
+    tax_amount: Decimal | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> TaxSubtotal:
+        return cls(
+            tax_category_id=d.get("tax_category_id"),
+            tax_category_percent=_parse_decimal(d.get("tax_category_percent")),
+            tax_scheme_id=d.get("tax_scheme_id"),
+            taxable_amount=_parse_decimal(d.get("taxable_amount")),
+            tax_amount=_parse_decimal(d.get("tax_amount")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class MonetaryTotal:
+    """Document-level monetary summary (spec: MonetaryTotal)."""
+
+    line_extension_amount: Decimal | None = None
+    allowance_total_amount: Decimal | None = None
+    tax_exclusive_amount: Decimal | None = None
+    tax_inclusive_amount: Decimal | None = None
+    prepaid_amount: Decimal | None = None
+    payable_amount: Decimal | None = None
+    document_currency_code: str | None = None
+    tax_subtotal: tuple[TaxSubtotal, ...] = ()
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> MonetaryTotal:
+        return cls(
+            line_extension_amount=_parse_decimal(d.get("line_extension_amount")),
+            allowance_total_amount=_parse_decimal(d.get("allowance_total_amount")),
+            tax_exclusive_amount=_parse_decimal(d.get("tax_exclusive_amount")),
+            tax_inclusive_amount=_parse_decimal(d.get("tax_inclusive_amount")),
+            prepaid_amount=_parse_decimal(d.get("prepaid_amount")),
+            payable_amount=_parse_decimal(d.get("payable_amount")),
+            document_currency_code=d.get("document_currency_code"),
+            tax_subtotal=tuple(TaxSubtotal.from_dict(s) for s in d.get("tax_subtotal") or ()),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BusinessPaymentMeans:
+    """One payment channel of the supplier (spec: BusinessPaymentMeans)."""
+
+    payee_financial_account: str | None = None
+    bic_id: str | None = None
+    financial_institution_name: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> BusinessPaymentMeans:
+        return cls(
+            payee_financial_account=d.get("payee_financial_account"),
+            bic_id=d.get("bic_id"),
+            financial_institution_name=d.get("financial_institution_name"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BusinessDocument:
+    """Canonical parsed business document (spec: BusinessDocument, EN 16931).
+
+    Single export schema for JSON parse results since spec 0.13.0. Check
+    :attr:`document_source`: ``xml-*`` documents are legally reliable XML
+    parses, ``llm-*`` documents are best-effort extractions.
+    """
+
+    document_source: str | None = None
+    document_type_name: str | None = None
+    document_type_code: str | None = None
+    id: str | None = None
+    buyer_reference: str | None = None
+    project_reference: str | None = None
+    contract_reference: str | None = None
+    issue_date: datetime | None = None
+    due_date: datetime | None = None
+    note: str | None = None
+    additional_document_ref: str | None = None
+    document_summary: str | None = None
+    accounting_supplier_party: BusinessParty | None = None
+    accounting_customer_party: BusinessParty | None = None
+    business_document_lines: tuple[BusinessDocumentLine, ...] = ()
+    legal_monetary_total: MonetaryTotal | None = None
+    payment_terms: str | None = None
+    payment_means_code: str | None = None
+    payment_means: tuple[BusinessPaymentMeans, ...] = ()
+
+    @property
+    def is_paid(self) -> bool:
+        """True when payment_terms carries the deterministic ``[PAID]`` token."""
+        return self.payment_terms is not None and self.payment_terms.endswith(PAID_TOKEN)
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> BusinessDocument:
+        supplier = d.get("accounting_supplier_party")
+        customer = d.get("accounting_customer_party")
+        total = d.get("legal_monetary_total")
+        return cls(
+            document_source=d.get("document_source"),
+            document_type_name=d.get("document_type_name"),
+            document_type_code=d.get("document_type_code"),
+            id=d.get("id"),
+            buyer_reference=d.get("buyer_reference"),
+            project_reference=d.get("project_reference"),
+            contract_reference=d.get("contract_reference"),
+            issue_date=_parse_datetime(d.get("issue_date")),
+            due_date=_parse_datetime(d.get("due_date")),
+            note=d.get("note"),
+            additional_document_ref=d.get("additional_document_ref"),
+            document_summary=d.get("document_summary"),
+            accounting_supplier_party=(
+                BusinessParty.from_dict(supplier) if supplier is not None else None
+            ),
+            accounting_customer_party=(
+                BusinessParty.from_dict(customer) if customer is not None else None
+            ),
+            business_document_lines=tuple(
+                BusinessDocumentLine.from_dict(x) for x in d.get("business_document_lines") or ()
+            ),
+            legal_monetary_total=MonetaryTotal.from_dict(total) if total is not None else None,
+            payment_terms=d.get("payment_terms"),
+            payment_means_code=d.get("payment_means_code"),
+            payment_means=tuple(
+                BusinessPaymentMeans.from_dict(x) for x in d.get("payment_means") or ()
+            ),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ParsedDocument:
-    """Parsed document record; ``data`` is untyped by design (see spec)."""
+    """Parsed document record; ``data`` is the raw payload (see
+    :meth:`business_document` for the typed view of JSON records)."""
 
     id: int
     message_id: str
@@ -305,6 +577,16 @@ class ParsedDocument:
             llm_inference_time_ms=d.get("llm_inference_time_ms"),
             is_deduplicated_by=d.get("is_deduplicated_by", False),
         )
+
+    def business_document(self) -> BusinessDocument | None:
+        """Typed view of the ``data`` payload (spec ≥ 0.13.0).
+
+        Returns None for binary records or when ``data`` is not a JSON
+        object. The raw payload stays available in :attr:`data`.
+        """
+        if self.data_type != "json" or not isinstance(self.data, Mapping):
+            return None
+        return BusinessDocument.from_dict(self.data)
 
 
 #: Status values accepted by ``report_status`` (spec: ConsumerStatusValue).

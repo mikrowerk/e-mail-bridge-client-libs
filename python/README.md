@@ -8,6 +8,13 @@ fetch the parsed e-mail and its attachments, report the import outcome.
 - Covers the simplified `/messages/{messageId}` endpoint family plus
   `consumer_status`; see `spec/business-document-api.yaml` (the vendored
   OpenAPI spec this release is verified against — `SPEC_VERSION`).
+- Since spec 0.13.0 the `data` payload of JSON parsed-document records is the
+  canonical **BusinessDocument** schema (EN 16931);
+  `ParsedDocument.business_document()` returns the typed view with monetary
+  amounts as `decimal.Decimal`. Check `document_source`: `xml-*` documents
+  are faithful XML parses, `llm-*` documents are best-effort extractions —
+  apply your own validation before booking. A paid invoice carries the
+  deterministic `[PAID]` suffix on `payment_terms` (`BusinessDocument.is_paid`).
 
 ## Install
 
@@ -45,7 +52,10 @@ from email_bridge_client import IngestionClient
 
 with IngestionClient("https://host/api/v1", token=PAT) as client:
     message = client.get_message(uuid)
-    documents = client.list_parsed_documents(uuid)
+    for record in client.list_parsed_documents(uuid):
+        invoice = record.business_document()      # typed EN 16931 view, None for binary
+        if invoice is not None:
+            total = invoice.legal_monetary_total.payable_amount  # decimal.Decimal
     for attachment in client.list_attachments(uuid):
         content = client.download_attachment(uuid, attachment.id)
         save(content.filename, content.content)

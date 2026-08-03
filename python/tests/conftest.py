@@ -121,7 +121,7 @@ def parsed_document_payload(business_doc_data: dict) -> dict:
         "document_type": "invoice",
         "data_type": "json",
         "data": business_doc_data,
-        "stage_parser": "businessdocument",
+        "stage_parser": "parser/businessdocument/llmpdf/anthropic/claude-sonnet-4-6",
         "stage_completed_at": "2026-07-27T10:17:30Z",
         "stage_duration_s": 12.5,
         "llm_model_name": "claude-sonnet-5",

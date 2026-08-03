@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from email_bridge_client import Backlink, ConsumerStatus, MessageDetail, ParsedDocument
 
@@ -46,9 +47,72 @@ class TestParsedDocument:
         p = ParsedDocument.from_dict(parsed_document_payload)
         assert p.data_type == "json"
         assert isinstance(p.data, dict)
-        assert p.data["document_type_code"] == "string"
+        assert p.data["document_type_code"] == "380"
         assert p.is_fully_parsed is True
         assert p.created_at.tzinfo is not None
+
+    def test_business_document_typed_view(self, parsed_document_payload: dict):
+        doc = ParsedDocument.from_dict(parsed_document_payload).business_document()
+        assert doc is not None
+        assert doc.document_source == "llm-pdf"
+        assert doc.document_type_code == "380"
+        assert doc.id == "RE-2026-100"
+        assert doc.buyer_reference == "04011000-12345-67"
+        assert doc.additional_document_ref == "BEST-77"
+        assert doc.issue_date.tzinfo is not None
+        assert doc.accounting_supplier_party.name == "ACME GmbH"
+        assert doc.accounting_supplier_party.company_registration_id == "HRB 12345"
+        assert doc.accounting_customer_party.vat_id == "DE987654321"
+
+        line = doc.business_document_lines[0]
+        assert line.item_name == "Consulting Basic"
+        assert line.sellers_item_identification == "ART-77"
+        assert line.invoiced_quantity == Decimal(8)
+        assert line.price.item_net_price == Decimal(150)
+        assert line.classified_tax_category.id == "S"
+        assert line.classified_tax_category.percent == Decimal(19)
+        assert line.vat_amount == Decimal(228)
+
+        total = doc.legal_monetary_total
+        assert total.tax_exclusive_amount == Decimal(1100)
+        assert total.tax_inclusive_amount == Decimal(1428)
+        assert total.payable_amount == Decimal(1428)
+        assert total.document_currency_code == "EUR"
+        assert total.tax_subtotal[0].tax_amount == Decimal(228)
+        assert total.tax_subtotal[0].tax_category_id is None
+
+        assert doc.payment_means[0].payee_financial_account == "DE44500105175407324931"
+        assert doc.is_paid is True
+
+    def test_business_document_none_for_binary(self):
+        p = ParsedDocument.from_dict(
+            {
+                "id": 1,
+                "message_id": "m",
+                "attachment_index": 0,
+                "document_type": "invoice",
+                "data_type": "binary",
+                "is_fully_parsed": False,
+                "created_at": "2026-07-27T10:17:30Z",
+            }
+        )
+        assert p.business_document() is None
+
+    def test_business_document_unpaid(self, business_doc_data: dict):
+        data = dict(business_doc_data, payment_terms="30 days net")
+        p = ParsedDocument.from_dict(
+            {
+                "id": 1,
+                "message_id": "m",
+                "attachment_index": 0,
+                "document_type": "invoice",
+                "data_type": "json",
+                "is_fully_parsed": True,
+                "created_at": "2026-07-27T10:17:30Z",
+                "data": data,
+            }
+        )
+        assert p.business_document().is_paid is False
 
     def test_minimal(self):
         p = ParsedDocument.from_dict(

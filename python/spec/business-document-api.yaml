@@ -14,7 +14,7 @@ info:
     Fields marked `writeOnly` (tenant `attachment_store_secrets`; mailbox
     credential `credentials`; action `auth_credentials`) are accepted on
     write but never returned in any response.
-  version: 0.12.0
+  version: 0.13.0
 
 servers:
   - url: localhost:8080/api/v1
@@ -681,6 +681,39 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/thread:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    get:
+      tags: [Messages]
+      operationId: listMessageThread
+      summary: List all messages of the thread this message belongs to
+      description: >
+        Returns every ingested message sharing the given message's thread_id,
+        ordered by received_at ascending (thread root first). A standalone
+        message yields a single-element list. Thread members may live in other
+        mailboxes of the same tenant.
+      responses:
+        '200':
+          description: Messages of the thread, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   # ── Parsed Documents ──────────────────────────────────────────────────────────
 
   /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/parsed-documents:
@@ -984,6 +1017,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AttachmentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/thread:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+
+    get:
+      tags: [Messages]
+      operationId: listMessageThreadSimplified
+      summary: List all messages of the thread this message belongs to (simplified path)
+      description: >
+        Returns every ingested message sharing the given message's thread_id,
+        ordered by received_at ascending (thread root first). A standalone
+        message yields a single-element list.
+      responses:
+        '200':
+          description: Messages of the thread, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MessageResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2785,6 +2848,20 @@ components:
           items:
             $ref: '#/components/schemas/ClassificationEntry'
           description: Per-part classification entries (email body and each parsed attachment).
+        is_thread:
+          type: boolean
+          description: >
+            True when the message belongs to an email thread with more than one
+            ingested member, or when the subject+participant heuristic flagged
+            it as a likely reply.
+        thread_id:
+          type: string
+          format: uuid
+          description: >
+            Conversation grouping identifier. Equals the id of the thread's
+            root message; a standalone message is a thread of size 1
+            (thread_id == id). All messages of one conversation share this
+            value — list them via GET /messages/{messageId}/thread.
 
     MessageDetailResponse:
       allOf:
@@ -2817,6 +2894,40 @@ components:
                 $ref: '#/components/schemas/AttachmentSummary'
             stage_result:
               $ref: '#/components/schemas/MessageStageResult'
+            message_id_hdr:
+              type: string
+              description: >
+                RFC 5322 Message-ID of this message, without angle brackets.
+                Together with in_reply_to and references this lets external
+                systems correlate the message against their own mail archive
+                or run their own threading (JWZ / JMAP style).
+            in_reply_to:
+              type: string
+              description: >
+                Message-ID of the direct parent (first token of the
+                In-Reply-To header), without angle brackets. Empty for
+                non-replies.
+            references:
+              type: array
+              items:
+                type: string
+              description: >
+                Message-ID tokens of the References header in original order
+                (oldest ancestor first), without angle brackets.
+            provider_thread_id:
+              type: string
+              description: >
+                Mail provider's native conversation identifier (Gmail
+                threadId, Microsoft Graph conversationId). Empty for IMAP
+                sources.
+            parent_id:
+              type: string
+              format: uuid
+              nullable: true
+              description: >
+                Internal id of the direct parent message when the
+                In-Reply-To/References chain matched an ingested message.
+                Null otherwise.
 
     PagedMessageResponse:
       type: object
@@ -2978,7 +3089,15 @@ components:
           type: string
           description: How the data field is encoded ("json" or "binary")
         data:
-          description: Parsed document payload; structure depends on data_type and document_type
+          description: |
+            Parsed document payload. For `data_type` "json" this is always the
+            canonical BusinessDocument schema — XML parse results (CII, UBL,
+            ZUGFeRD) are stored in that shape, LLM parse results are mapped to
+            it at serve time. Check `document_source` inside the payload for
+            provenance: `llm-pdf` / `llm-body` documents are best-effort
+            extractions; importing systems must apply their own validation and
+            taxation logic. For `data_type` "binary" the payload is absent.
+            Schema: see `#/components/schemas/BusinessDocument`.
         stage_parser:
           type: string
         stage_completed_at:
@@ -3101,9 +3220,12 @@ components:
 
     Document:
       type: object
+      deprecated: true
       description: |
-        Canonical parsed business document produced by the pipeline (Stage 3).
-        Normalises output from CII, UBL, ZUGFeRD, PDF, and LLM-based parsers.
+        DEPRECATED — replaced by the BusinessDocument schema. Since v0.13.0
+        the `data` payload of parsed-document responses is always the
+        canonical BusinessDocument shape; LLM parse results are mapped to it
+        at serve time. This schema remains only to describe historic payloads.
       properties:
         document_type_name:
           type: string
@@ -3276,6 +3398,253 @@ components:
         bank_name:
           type: string
           description: Name of the financial institution
+
+    # ── BusinessDocument (canonical export schema, EN 16931) ─────────────────────
+
+    DocumentSource:
+      type: string
+      enum: [xml-cii, xml-ubl, xml-zugferd, llm-pdf, llm-body]
+      description: |
+        Provenance of a BusinessDocument. `xml-*` sources are faithful
+        EN 16931 representations parsed from structured XML and legally
+        reliable. `llm-*` sources are best-effort LLM extractions from
+        unstructured content (PDF or e-mail body) — they may be incomplete or
+        violate EN 16931 business rules; importing systems must apply their
+        own validation and taxation logic.
+
+    BusinessDocument:
+      type: object
+      description: |
+        Canonical parsed business document based on EN 16931
+        (XRechnung / ZUGFeRD / Factur-X). Single export schema for all parse
+        results since v0.13.0. All monetary amounts and quantities are decimal
+        values encoded as JSON strings (e.g. "1428.00") to avoid float
+        precision loss.
+      properties:
+        document_source:
+          $ref: '#/components/schemas/DocumentSource'
+        document_type_name:
+          type: string
+          description: Human-readable document type label (e.g. "Commercial Invoice")
+        document_type_code:
+          type: string
+          description: UN/CEFACT UNCL 1001 code (e.g. "380" for Invoice)
+        id:
+          type: string
+          description: Document / invoice number
+        buyer_reference:
+          type: string
+          description: Buyer-assigned reference (e.g. Leitweg-ID on XRechnung)
+        project_reference:
+          type: string
+        contract_reference:
+          type: string
+        issue_date:
+          type: string
+          format: date-time
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+          description: Payment due date. Absent if not explicitly stated.
+        note:
+          type: string
+          description: Free-text note. For LLM sources any additional info is appended after a blank line.
+        additional_document_ref:
+          type: string
+          description: Cross-referenced document (e.g. order number for LLM sources)
+        document_summary:
+          type: string
+          description: One-sentence description of the document (LLM-generated for llm-* sources)
+        accounting_supplier_party:
+          $ref: '#/components/schemas/BusinessParty'
+        accounting_customer_party:
+          $ref: '#/components/schemas/BusinessParty'
+        business_document_lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessDocumentLine'
+        legal_monetary_total:
+          $ref: '#/components/schemas/MonetaryTotal'
+        payment_terms:
+          type: string
+          description: |
+            Free-text payment terms. When the source document is marked as
+            paid (LLM sources only), the deterministic token "[PAID]" is
+            appended — importers can test for that exact suffix.
+        payment_means_code:
+          type: string
+          description: Payment means code or method label (e.g. "bank transfer")
+        payment_means:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessPaymentMeans'
+
+    BusinessParty:
+      type: object
+      description: A trading partner (seller or buyer).
+      properties:
+        name:
+          type: string
+        street_name:
+          type: string
+        postal_zone:
+          type: string
+        city_name:
+          type: string
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2 country code (e.g. "DE")
+        vat_id:
+          type: string
+          description: VAT registration number (e.g. "DE123456789")
+        tax_registration_id:
+          type: string
+          description: Local tax number (Steuernummer)
+        company_registration_id:
+          type: string
+          description: Commercial register number (e.g. "HRB 12345")
+        electronic_mail:
+          type: string
+        telephone:
+          type: string
+
+    BusinessDocumentLine:
+      type: object
+      description: A single line item. Decimal values are JSON strings.
+      properties:
+        id:
+          type: string
+          description: Line identifier / position number
+        item_name:
+          type: string
+          description: Short article or service name
+        description:
+          type: string
+          description: Longer explanatory line text
+        invoiced_quantity:
+          type: string
+          description: Decimal string
+        unit_code:
+          type: string
+          description: Unit of measure (UN/ECE Rec 20 code for xml-* sources)
+        standard_item_identification:
+          type: string
+          description: Standardised item ID (e.g. GTIN); xml-* sources only
+        sellers_item_identification:
+          type: string
+          description: Seller-assigned article number
+        buyers_item_identification:
+          type: string
+        order_line_reference:
+          type: string
+        project_reference_line:
+          type: string
+        price:
+          $ref: '#/components/schemas/BusinessPrice'
+        allowance_charge_amount:
+          type: string
+          description: Absolute line discount/charge; decimal string
+        line_extension_amount:
+          type: string
+          description: Line net amount; decimal string
+        total_amount:
+          type: string
+          description: Line gross amount; decimal string
+        classified_tax_category:
+          $ref: '#/components/schemas/BusinessTaxCategory'
+        vat_amount:
+          type: string
+          description: Decimal string
+
+    BusinessPrice:
+      type: object
+      description: Unit price information. Decimal values are JSON strings.
+      properties:
+        item_net_price:
+          type: string
+          description: Decimal string
+        base_quantity:
+          type: string
+          description: Decimal string; "0" for llm-* sources (not derived)
+        base_quantity_unit_code:
+          type: string
+
+    BusinessTaxCategory:
+      type: object
+      description: VAT category applied to a line or totals row.
+      properties:
+        id:
+          type: string
+          description: |
+            EN 16931 category code (S=Standard, Z=Zero, E=Exempt,
+            AE=Reverse charge). For llm-* sources only set when the document
+            explicitly states the tax treatment — never inferred from the rate.
+        percent:
+          type: string
+          description: Tax rate percentage as decimal string (e.g. "19")
+        tax_scheme_id:
+          type: string
+          description: Tax scheme, default "VAT"
+
+    MonetaryTotal:
+      type: object
+      description: |
+        Document-level monetary summary. Decimal values are JSON strings.
+        For llm-* sources only simple arithmetic is applied
+        (tax_exclusive_amount = net − discount); prepaid_amount is never
+        derived and stays "0".
+      properties:
+        line_extension_amount:
+          type: string
+        allowance_total_amount:
+          type: string
+        tax_exclusive_amount:
+          type: string
+        tax_inclusive_amount:
+          type: string
+        prepaid_amount:
+          type: string
+        payable_amount:
+          type: string
+        document_currency_code:
+          type: string
+          description: ISO 4217 currency code (e.g. "EUR")
+        tax_subtotal:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxSubtotal'
+
+    TaxSubtotal:
+      type: object
+      description: |
+        One row of the document-level VAT breakdown. For llm-* sources the
+        buckets are copied from the extraction without back-calculation:
+        taxable_amount stays "0" and tax_category_id stays empty unless
+        stated on the document.
+      properties:
+        tax_category_id:
+          type: string
+        tax_category_percent:
+          type: string
+        tax_scheme_id:
+          type: string
+        taxable_amount:
+          type: string
+        tax_amount:
+          type: string
+
+    BusinessPaymentMeans:
+      type: object
+      description: One payment channel of the supplier.
+      properties:
+        payee_financial_account:
+          type: string
+          description: IBAN
+        bic_id:
+          type: string
+        financial_institution_name:
+          type: string
 
     AddressCreate:
       type: object
