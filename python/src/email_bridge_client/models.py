@@ -137,10 +137,20 @@ class StageResultClassification:
 
 @dataclass(frozen=True, slots=True)
 class StageResultDocument:
-    """Parsed-document summary within the stage result."""
+    """Parsed-document summary within the stage result.
+
+    Entries with ``deduplicated_by_index`` set (spec 0.15.0) are placeholders
+    for attachments that were skipped because a canonical duplicate (typically
+    an XML equivalent of a PDF) was parsed instead. They carry no document
+    payload fields and must not be imported as documents; an absent
+    ``deduplicated_by_index`` means the entry is not a duplicate.
+    """
 
     attachment_id: int | None = None
     attachment_name: str | None = None
+    deduplicated_by_index: int | None = None
+    deduplicated_by_name: str | None = None
+    deduplicated_by_attachment_id: int | None = None
     document_type_code: str | None = None
     document_type_name: str | None = None
     document_date: date | None = None
@@ -148,11 +158,19 @@ class StageResultDocument:
     summary: str | None = None
     stage_metadata: StageMetadataInfo | None = None
 
+    @property
+    def is_duplicate(self) -> bool:
+        """True when this entry is a dedup placeholder, not a document."""
+        return self.deduplicated_by_index is not None
+
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> StageResultDocument:
         return cls(
             attachment_id=d.get("attachment_id"),
             attachment_name=d.get("attachment_name"),
+            deduplicated_by_index=d.get("deduplicated_by_index"),
+            deduplicated_by_name=d.get("deduplicated_by_name"),
+            deduplicated_by_attachment_id=d.get("deduplicated_by_attachment_id"),
             document_type_code=d.get("document_type_code"),
             document_type_name=d.get("document_type_name"),
             document_date=_parse_date(d.get("document_date")),
@@ -610,7 +628,12 @@ class BusinessDocument:
 @dataclass(frozen=True, slots=True)
 class ParsedDocument:
     """Parsed document record; ``data`` is the raw payload (see
-    :meth:`business_document` for the typed view of JSON records)."""
+    :meth:`business_document` for the typed view of JSON records).
+
+    Since spec 0.15.0 duplicates are signalled by the presence of
+    ``deduplicated_by_index`` (replacing the former ``is_deduplicated_by``
+    boolean): an absent value means the record is not a duplicate.
+    """
 
     id: int
     message_id: str
@@ -628,7 +651,13 @@ class ParsedDocument:
     llm_input_tokens: int | None = None
     llm_output_tokens: int | None = None
     llm_inference_time_ms: int | None = None
-    is_deduplicated_by: bool = False
+    deduplicated_by_index: int | None = None
+    deduplicated_by_name: str | None = None
+
+    @property
+    def is_duplicate(self) -> bool:
+        """True when this record is a dedup placeholder, not a document."""
+        return self.deduplicated_by_index is not None
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> ParsedDocument:
@@ -649,7 +678,8 @@ class ParsedDocument:
             llm_input_tokens=d.get("llm_input_tokens"),
             llm_output_tokens=d.get("llm_output_tokens"),
             llm_inference_time_ms=d.get("llm_inference_time_ms"),
-            is_deduplicated_by=d.get("is_deduplicated_by", False),
+            deduplicated_by_index=d.get("deduplicated_by_index"),
+            deduplicated_by_name=d.get("deduplicated_by_name"),
         )
 
     def business_document(self) -> BusinessDocument | None:

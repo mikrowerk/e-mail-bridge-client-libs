@@ -26,6 +26,17 @@ class TestMessageDetail:
         assert m.stage_result.documents[0].document_date == date(2026, 7, 20)
         assert m.stage_result.documents[0].document_type_code == "380"
 
+    def test_stage_result_dedup_placeholder(self, message_detail_payload: dict):
+        docs = MessageDetail.from_dict(message_detail_payload).stage_result.documents
+        assert docs[0].is_duplicate is False
+        assert docs[0].deduplicated_by_index is None
+        dup = docs[1]
+        assert dup.is_duplicate is True
+        assert dup.deduplicated_by_index == 0
+        assert dup.deduplicated_by_name == "invoice.pdf"
+        assert dup.deduplicated_by_attachment_id == 7
+        assert dup.document_type_code is None
+
     def test_thread_and_correlation_fields(self, message_detail_payload: dict):
         m = MessageDetail.from_dict(message_detail_payload)
         assert m.is_thread
@@ -70,6 +81,27 @@ class TestParsedDocument:
         assert p.data["document_type_code"] == "380"
         assert p.is_fully_parsed is True
         assert p.created_at.tzinfo is not None
+        assert p.is_duplicate is False and p.deduplicated_by_index is None
+
+    def test_dedup_placeholder(self):
+        p = ParsedDocument.from_dict(
+            {
+                "id": 2,
+                "message_id": "m",
+                "attachment_index": 1,
+                "attachment_name": "invoice-copy.pdf",
+                "document_type": "invoice",
+                "data_type": "binary",
+                "is_fully_parsed": False,
+                "deduplicated_by_index": 0,
+                "deduplicated_by_name": "invoice.pdf",
+                "created_at": "2026-07-27T10:17:30Z",
+            }
+        )
+        assert p.is_duplicate is True
+        assert p.deduplicated_by_index == 0
+        assert p.deduplicated_by_name == "invoice.pdf"
+        assert p.business_document() is None
 
     def test_business_document_typed_view(self, parsed_document_payload: dict):
         doc = ParsedDocument.from_dict(parsed_document_payload).business_document()

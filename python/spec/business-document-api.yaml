@@ -14,7 +14,7 @@ info:
     Fields marked `writeOnly` (tenant `attachment_store_secrets`; mailbox
     credential `credentials`; action `auth_credentials`) are accepted on
     write but never returned in any response.
-  version: 0.14.0
+  version: 0.15.0
 
 servers:
   - url: localhost:8080/api/v1
@@ -3054,7 +3054,13 @@ components:
 
     StageResultDocument:
       type: object
-      description: Parsed document summary within the stage result.
+      description: >-
+        Parsed document summary within the stage result. Entries with
+        `deduplicated_by_index` set are placeholders for attachments that were
+        skipped because a canonical duplicate (typically an XML equivalent of
+        a PDF) was parsed instead; they carry no document payload fields and
+        must not be imported as documents. An absent `deduplicated_by_index`
+        means the entry is not a duplicate.
       properties:
         attachment_id:
           type: integer
@@ -3062,6 +3068,23 @@ components:
           description: Database ID of the source attachment (FK to attachments table)
         attachment_name:
           type: string
+        deduplicated_by_index:
+          type: integer
+          description: >-
+            Zero-based position of the canonical attachment this one was
+            deduplicated by. Only present when the attachment was skipped as
+            a duplicate — an absent value means not deduplicated.
+        deduplicated_by_name:
+          type: string
+          description: >-
+            Filename of the canonical attachment. Only present when
+            deduplicated_by_index is set.
+        deduplicated_by_attachment_id:
+          type: integer
+          format: int64
+          description: >-
+            Database ID of the canonical attachment (FK to attachments
+            table). Only present when deduplicated_by_index is set.
         document_type_code:
           type: string
           description: UN/CEFACT UNCL 1001 code (e.g. "380" for Invoice)
@@ -3183,8 +3206,18 @@ components:
           nullable: true
         is_fully_parsed:
           type: boolean
-        is_deduplicated_by:
-          type: boolean
+        deduplicated_by_index:
+          type: integer
+          description: >-
+            Zero-based position of the canonical attachment this record was
+            deduplicated by. Only present when the attachment was skipped as
+            a duplicate — an absent value means not deduplicated. Replaces
+            the former is_deduplicated_by boolean (removed in 0.15.0).
+        deduplicated_by_name:
+          type: string
+          description: >-
+            Filename of the canonical attachment. Only present when
+            deduplicated_by_index is set.
         created_at:
           type: string
           format: date-time

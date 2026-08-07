@@ -20,6 +20,14 @@ fetch the parsed e-mail and its attachments, report the import outcome.
   correlation), `client.list_thread(uuid)` returns all members of a
   conversation, and the public **discovery endpoint** provides the OAuth
   client configuration (`fetch_client_config`, see below).
+- Since spec 0.15.0 **duplicates are signalled by presence of
+  `deduplicated_by_index`** — an absent value means not a duplicate; the
+  former `is_deduplicated_by` boolean is gone (breaking).
+  `stage_result.documents[]` now includes dedup placeholders pointing to the
+  canonical attachment (`deduplicated_by_name`,
+  `deduplicated_by_attachment_id`); skip entries where
+  `StageResultDocument.is_duplicate` / `ParsedDocument.is_duplicate` is true
+  when importing documents.
 
 ## Install
 
