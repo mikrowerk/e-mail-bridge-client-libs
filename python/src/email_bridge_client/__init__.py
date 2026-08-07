@@ -40,10 +40,10 @@ from .models import (
 )
 from .webhook import is_test_mode, parse_webhook_payload, verify_bearer_token
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 #: API spec version this release was verified against (spec/business-document-api.yaml).
-SPEC_VERSION = "0.14.0"
+SPEC_VERSION = "0.15.0"
 
 __all__ = [
     "BACKLINK_STATUS_VALUES",

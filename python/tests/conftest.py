@@ -100,7 +100,16 @@ def message_detail_payload() -> dict:
                     "document_date": "2026-07-20",
                     "document_number": "2026-0815",
                     "summary": "Invoice for office supplies.",
-                }
+                },
+                # Dedup placeholder (spec 0.15.0): attachment skipped in
+                # favor of the canonical attachment at position 0.
+                {
+                    "attachment_id": 8,
+                    "attachment_name": "invoice-copy.pdf",
+                    "deduplicated_by_index": 0,
+                    "deduplicated_by_name": "invoice.pdf",
+                    "deduplicated_by_attachment_id": 7,
+                },
             ],
         },
     }
@@ -137,7 +146,6 @@ def parsed_document_payload(business_doc_data: dict) -> dict:
         "llm_output_tokens": 900,
         "llm_inference_time_ms": 8000,
         "is_fully_parsed": True,
-        "is_deduplicated_by": False,
         "created_at": "2026-07-27T10:17:31Z",
     }
 
