@@ -785,3 +785,72 @@ class ConsumerStatus:
             created_at=_parse_datetime(d["created_at"]),
             backlinks=tuple(Backlink.from_dict(b) for b in d.get("backlinks") or ()),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class TenantAddress:
+    """Global address record of a tenant (spec 0.16.0: AddressResponse).
+
+    Master data of the legal entity behind a tenant — used e.g. by the Odoo
+    bridge to match a ``tenant_id`` against a ``res.company`` (name, address,
+    VAT id). ``mailbox_id`` is always ``None`` on records returned by
+    ``GET /tenants/self`` (only the global record is exposed there).
+    """
+
+    id: str
+    tenant_id: str
+    name: str
+    mailbox_id: str | None = None
+    street: str | None = None
+    postal_code: str | None = None
+    city: str | None = None
+    country: str | None = None
+    vat_id: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> TenantAddress:
+        return cls(
+            id=d["id"],
+            tenant_id=d["tenant_id"],
+            name=d["name"],
+            mailbox_id=d.get("mailbox_id"),
+            street=d.get("street"),
+            postal_code=d.get("postal_code"),
+            city=d.get("city"),
+            country=d.get("country"),
+            vat_id=d.get("vat_id"),
+            email=d.get("email"),
+            phone=d.get("phone"),
+            created_at=_parse_datetime(d.get("created_at")),
+            updated_at=_parse_datetime(d.get("updated_at")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TenantMasterData:
+    """Consumer-facing tenant master data (spec 0.16.0:
+    TenantMasterDataResponse, ``GET /tenants/self``).
+
+    ``address`` is ``None`` when the tenant has no global address record
+    maintained. Operational data (token limits, attachment store, service
+    window) is never part of this schema.
+    """
+
+    id: str
+    name: str
+    active: bool
+    address: TenantAddress | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> TenantMasterData:
+        addr = d.get("address")
+        return cls(
+            id=d["id"],
+            name=d["name"],
+            active=d["active"],
+            address=TenantAddress.from_dict(addr) if addr is not None else None,
+        )

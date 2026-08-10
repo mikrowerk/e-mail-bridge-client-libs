@@ -225,3 +225,27 @@ def client_config_payload() -> dict:
 @pytest.fixture(scope="session")
 def error_payload() -> dict:
     return {"code": "NOT_FOUND", "message": "message not found"}
+
+
+@pytest.fixture(scope="session")
+def tenant_master_data_payload() -> dict:
+    return {
+        "id": TENANT_ID,
+        "name": "Gammadata Systeme und Software GmbH",
+        "active": True,
+        "address": {
+            "id": "7d1f2a9c-3b44-4e0f-8a55-0c9e1d2b3f04",
+            "tenant_id": TENANT_ID,
+            "mailbox_id": None,
+            "name": "Gammadata Systeme und Software GmbH",
+            "street": "Geschwister-Scholl-Ring 17",
+            "postal_code": "82110",
+            "city": "Germering",
+            "country": "DE",
+            "vat_id": "DE128237446",
+            "email": "email@gammadata.de",
+            "phone": "",
+            "created_at": "2026-08-10T09:00:00Z",
+            "updated_at": "2026-08-10T09:00:00Z",
+        },
+    }

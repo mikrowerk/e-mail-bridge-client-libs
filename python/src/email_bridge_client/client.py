@@ -37,6 +37,7 @@ from .models import (
     MessageDetail,
     MessageSummary,
     ParsedDocument,
+    TenantMasterData,
 )
 
 #: Default per-request timeout in seconds (connect and read).
@@ -233,6 +234,19 @@ class IngestionClient:
         """``GET /messages/{messageId}/consumer_status`` — prior reports."""
         items = self._get_json(f"/messages/{_seg(message_id)}/consumer_status")
         return [ConsumerStatus.from_dict(x) for x in items]
+
+    # ── tenants ───────────────────────────────────────────────────────────
+
+    def list_own_tenants(self) -> list[TenantMasterData]:
+        """``GET /tenants/self`` — master data of the caller's own tenants.
+
+        Currently always at most one element (the token's home tenant); the
+        list form is future-proofing for multi-tenant grants. Empty when the
+        home tenant is soft-deleted or cannot be resolved. Requires spec
+        0.16.0+ on the server (older bridges return 404).
+        """
+        items = self._get_json("/tenants/self")
+        return [TenantMasterData.from_dict(x) for x in items]
 
     # ── discovery ─────────────────────────────────────────────────────────
 
