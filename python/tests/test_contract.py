@@ -157,3 +157,18 @@ class TestResponseContracts:
             path=f"{PREFIX}/.well-known/client-config",
         )
         openapi.validate_response(request, _json_response({"auth_provider_type": "local_jwt"}))
+
+    def test_tenants_self(self, openapi: OpenAPI, tenant_master_data_payload: dict):
+        openapi.validate_response(
+            _get("/tenants/self"),
+            _json_response([tenant_master_data_payload]),
+        )
+
+    def test_tenants_self_without_address(
+        self, openapi: OpenAPI, tenant_master_data_payload: dict
+    ):
+        payload = {k: v for k, v in tenant_master_data_payload.items() if k != "address"}
+        openapi.validate_response(_get("/tenants/self"), _json_response([payload]))
+
+    def test_tenants_self_empty_list(self, openapi: OpenAPI):
+        openapi.validate_response(_get("/tenants/self"), _json_response([]))

@@ -10,6 +10,7 @@ from email_bridge_client import (
     MessageDetail,
     MessageSummary,
     ParsedDocument,
+    TenantMasterData,
 )
 
 
@@ -248,3 +249,32 @@ class TestClientConfig:
         cfg = ClientConfig.from_dict({"auth_provider_type": "local_jwt"})
         assert not cfg.is_remote
         assert cfg.issuer is None and cfg.scope is None and cfg.audience is None
+
+
+class TestTenantMasterData:
+    def test_with_address(self, tenant_master_data_payload: dict):
+        t = TenantMasterData.from_dict(tenant_master_data_payload)
+        assert t.id == tenant_master_data_payload["id"]
+        assert t.name == "Gammadata Systeme und Software GmbH"
+        assert t.active
+        assert t.address is not None
+        assert t.address.tenant_id == t.id
+        assert t.address.mailbox_id is None
+        assert t.address.vat_id == "DE128237446"
+        assert t.address.country == "DE"
+        assert t.address.created_at == datetime(2026, 8, 10, 9, 0, tzinfo=timezone.utc)
+
+    def test_without_address(self, tenant_master_data_payload: dict):
+        payload = {**tenant_master_data_payload, "address": None}
+        t = TenantMasterData.from_dict(payload)
+        assert t.address is None
+
+    def test_address_key_absent(self, tenant_master_data_payload: dict):
+        payload = {k: v for k, v in tenant_master_data_payload.items() if k != "address"}
+        t = TenantMasterData.from_dict(payload)
+        assert t.address is None
+
+    def test_unknown_fields_ignored(self, tenant_master_data_payload: dict):
+        payload = {**tenant_master_data_payload, "future_field": 42}
+        t = TenantMasterData.from_dict(payload)
+        assert t.name == "Gammadata Systeme und Software GmbH"

@@ -252,3 +252,19 @@ class TestConsumerStatus:
         responses.get(f"{MSG_URL}/consumer_status", json=[consumer_status_payload])
         items = client.list_consumer_status(MESSAGE_ID)
         assert len(items) == 1 and items[0].consumer_name == "odoo-prod"
+
+
+class TestTenants:
+    @responses.activate
+    def test_list_own_tenants(self, client: IngestionClient, tenant_master_data_payload: dict):
+        responses.get(f"{BASE_URL}/tenants/self", json=[tenant_master_data_payload])
+        items = client.list_own_tenants()
+        assert len(items) == 1
+        assert items[0].id == tenant_master_data_payload["id"]
+        assert items[0].address is not None
+        assert items[0].address.vat_id == "DE128237446"
+
+    @responses.activate
+    def test_list_own_tenants_empty(self, client: IngestionClient):
+        responses.get(f"{BASE_URL}/tenants/self", json=[])
+        assert client.list_own_tenants() == []

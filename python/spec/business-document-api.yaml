@@ -14,7 +14,7 @@ info:
     Fields marked `writeOnly` (tenant `attachment_store_secrets`; mailbox
     credential `credentials`; action `auth_credentials`) are accepted on
     write but never returned in any response.
-  version: 0.15.0
+  version: 0.16.0
 
 servers:
   - url: localhost:8080/api/v1
@@ -139,6 +139,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PagedTenantResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/self:
+    get:
+      tags: [Tenants]
+      operationId: listOwnTenants
+      summary: List master data of the caller's own tenants
+      description: |
+        Returns master data for every tenant the calling identity is bound to
+        — currently always exactly one element, the caller's home tenant; the
+        list form is future-proofing for multi-tenant grants. Accessible to
+        tenant-bound roles (`mailbox_user`, `tenant_admin`) and
+        `global_tenant_admin` (which receives its home tenant, the bootstrap
+        tenant). Contains no operational data (token limits, attachment
+        store, service window). Returns an empty list when the home tenant is
+        soft-deleted or the tenant claim cannot be resolved.
+      responses:
+        '200':
+          description: Master data of the caller's tenants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TenantMasterDataResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2628,6 +2658,30 @@ components:
             $ref: '#/components/schemas/TenantResponse'
         meta:
           $ref: '#/components/schemas/PaginationMeta'
+
+    TenantMasterDataResponse:
+      type: object
+      description: |
+        Consumer-facing tenant master data (GET /tenants/self): identity plus
+        the global address record — no operational data.
+      required: [id, name, active]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID7 tenant identifier
+        name:
+          type: string
+        active:
+          type: boolean
+        address:
+          nullable: true
+          description: |
+            The tenant's global address record (master data for matching
+            against an external business system). Null when no global address
+            is maintained. Mailbox-specific overrides are never returned.
+          allOf:
+            - $ref: '#/components/schemas/AddressResponse'
 
     # ── Mailbox ───────────────────────────────────────────────────────────────────
 
