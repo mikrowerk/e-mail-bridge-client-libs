@@ -693,30 +693,32 @@ class ParsedDocument:
         return BusinessDocument.from_dict(self.data)
 
 
-#: Status values accepted by ``report_status`` (spec: ConsumerStatusValue).
-#: ``related`` means the message was matched to an existing record in the
-#: external system rather than imported as a new one.
-CONSUMER_STATUS_VALUES = ("imported", "failed", "skipped", "related")
-
-#: Per-backlink status values (spec: BacklinkStatus).
-BACKLINK_STATUS_VALUES = ("imported", "related")
+#: Link classification values (spec: LinkKind). ``created`` = record was
+#: created by the import; ``related`` = message was matched to an existing one.
+LINK_KIND_VALUES = ("created", "related")
 
 
 @dataclass(frozen=True, slots=True)
-class Backlink:
-    """Hyperlink to the record a consumer imported or matched in the external
-    system (spec: ConsumerStatusBacklink)."""
+class RecordLink:
+    """Record link of a connected system for a message (spec: RecordLink).
+
+    For requests, set ``url`` (absolute, must match the system's registered
+    ``base_web_url``) and ``kind``; ``title`` is optional. In responses
+    ``path`` carries the stored path relative to the system's base web URL
+    and ``url`` the absolute URL composed at serve time.
+    """
 
     url: str
-    status: str
+    kind: str
     title: str | None = None
+    path: str | None = None
 
     @classmethod
-    def from_dict(cls, d: Mapping[str, Any]) -> Backlink:
-        return cls(url=d["url"], status=d["status"], title=d.get("title"))
+    def from_dict(cls, d: Mapping[str, Any]) -> RecordLink:
+        return cls(url=d["url"], kind=d["kind"], title=d.get("title") or None, path=d.get("path"))
 
     def to_dict(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"url": self.url, "status": self.status}
+        out: dict[str, Any] = {"url": self.url, "kind": self.kind}
         if self.title is not None:
             out["title"] = self.title
         return out
@@ -757,33 +759,37 @@ class ClientConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class ConsumerStatus:
-    """One append-only consumer-status audit entry."""
+class ConnectedSystemStatus:
+    """The current processing report of one connected system for a message
+    (spec 0.18.0: ConnectedSystemStatusResponse). Exactly one entry exists
+    per (message, connected system); a re-report replaces it."""
 
     id: str
     tenant_id: str
     message_id: str
     mailbox_id: str
-    consumer_name: str
-    consumer_type: str
+    connected_system_id: str
+    external_uuid: str
+    connected_system_name: str
     status: str
     created_by_user_id: str
     created_at: datetime
-    backlinks: tuple[Backlink, ...] = ()
+    links: tuple[RecordLink, ...] = ()
 
     @classmethod
-    def from_dict(cls, d: Mapping[str, Any]) -> ConsumerStatus:
+    def from_dict(cls, d: Mapping[str, Any]) -> ConnectedSystemStatus:
         return cls(
             id=d["id"],
             tenant_id=d["tenant_id"],
             message_id=d["message_id"],
             mailbox_id=d["mailbox_id"],
-            consumer_name=d["consumer_name"],
-            consumer_type=d["consumer_type"],
+            connected_system_id=d["connected_system_id"],
+            external_uuid=d["external_uuid"],
+            connected_system_name=d["connected_system_name"],
             status=d["status"],
             created_by_user_id=d["created_by_user_id"],
             created_at=_parse_datetime(d["created_at"]),
-            backlinks=tuple(Backlink.from_dict(b) for b in d.get("backlinks") or ()),
+            links=tuple(RecordLink.from_dict(x) for x in d.get("links") or ()),
         )
 
 

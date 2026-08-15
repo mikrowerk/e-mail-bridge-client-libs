@@ -4,13 +4,13 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from email_bridge_client import (
-    Backlink,
     ClientConfig,
     ConnectedSystem,
-    ConsumerStatus,
+    ConnectedSystemStatus,
     MessageDetail,
     MessageSummary,
     ParsedDocument,
+    RecordLink,
     TenantMasterData,
 )
 
@@ -183,36 +183,43 @@ class TestParsedDocument:
         assert p.data is None and p.attachment_index == -1
 
 
-class TestConsumerStatus:
-    def test_from_dict(self, consumer_status_payload: dict):
-        cs = ConsumerStatus.from_dict(consumer_status_payload)
+class TestConnectedSystemStatus:
+    def test_from_dict(self, connected_system_status_payload: dict):
+        cs = ConnectedSystemStatus.from_dict(connected_system_status_payload)
         assert cs.status == "imported"
-        assert cs.consumer_type == "odoo-email-bridge"
+        assert cs.connected_system_name == "Odoo Prod"
+        assert cs.external_uuid == connected_system_status_payload["external_uuid"]
         assert cs.created_at.tzinfo is not None
-        assert cs.backlinks == (
-            Backlink(
+        assert cs.links == (
+            RecordLink(
                 url="https://odoo.example.com/odoo/invoices/42",
-                status="imported",
+                kind="created",
                 title="Invoice INV/2026/0042",
+                path="/odoo/invoices/42",
             ),
-            Backlink(url="https://odoo.example.com/odoo/contacts/7", status="related"),
+            RecordLink(
+                url="https://odoo.example.com/odoo/contacts/7",
+                kind="related",
+                title=None,
+                path="/odoo/contacts/7",
+            ),
         )
 
-    def test_from_dict_without_backlinks(self, consumer_status_payload: dict):
-        payload = {k: v for k, v in consumer_status_payload.items() if k != "backlinks"}
-        cs = ConsumerStatus.from_dict(payload)
-        assert cs.backlinks == ()
+    def test_from_dict_without_links(self, connected_system_status_payload: dict):
+        payload = {k: v for k, v in connected_system_status_payload.items() if k != "links"}
+        cs = ConnectedSystemStatus.from_dict(payload)
+        assert cs.links == ()
 
 
-class TestBacklink:
-    def test_to_dict_omits_absent_title(self):
-        assert Backlink(url="https://x/1", status="related").to_dict() == {
+class TestRecordLink:
+    def test_to_dict_omits_absent_title_and_path(self):
+        assert RecordLink(url="https://x/1", kind="related").to_dict() == {
             "url": "https://x/1",
-            "status": "related",
+            "kind": "related",
         }
-        assert Backlink(url="https://x/1", status="imported", title="Rec").to_dict() == {
+        assert RecordLink(url="https://x/1", kind="created", title="Rec").to_dict() == {
             "url": "https://x/1",
-            "status": "imported",
+            "kind": "created",
             "title": "Rec",
         }
 

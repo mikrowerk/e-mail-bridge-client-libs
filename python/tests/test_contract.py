@@ -94,38 +94,87 @@ class TestResponseContracts:
             response,
         )
 
-    def test_consumer_status_create(self, openapi: OpenAPI, consumer_status_payload: dict):
+    def test_connected_system_status_report(
+        self, openapi: OpenAPI, connected_system_status_payload: dict
+    ):
         request = MockRequest(
             host_url=HOST_URL,
             method="POST",
-            path=f"{PREFIX}/messages/{MESSAGE_ID}/consumer_status",
+            path=f"{PREFIX}/messages/{MESSAGE_ID}/connected_system_status",
             headers={
                 "Authorization": "Bearer test-token",
                 "Content-Type": "application/json",
             },
             data=json.dumps(
                 {
-                    "consumer_name": "odoo-prod",
-                    "consumer_type": "odoo-email-bridge",
+                    "external_uuid": connected_system_status_payload["external_uuid"],
                     "status": "imported",
-                    "backlinks": [
+                    "links": [
                         {
                             "url": "https://odoo.example.com/odoo/invoices/42",
                             "title": "Invoice INV/2026/0042",
-                            "status": "imported",
+                            "kind": "created",
                         }
                     ],
                 }
             ).encode(),
         )
         openapi.validate_request(request)
-        openapi.validate_response(request, _json_response(consumer_status_payload, status=201))
-
-    def test_consumer_status_list(self, openapi: OpenAPI, consumer_status_payload: dict):
         openapi.validate_response(
-            _get(f"/messages/{MESSAGE_ID}/consumer_status"),
-            _json_response([consumer_status_payload]),
+            request, _json_response(connected_system_status_payload, status=201)
         )
+
+    def test_connected_system_status_list(
+        self, openapi: OpenAPI, connected_system_status_payload: dict
+    ):
+        openapi.validate_response(
+            _get(f"/messages/{MESSAGE_ID}/connected_system_status"),
+            _json_response([connected_system_status_payload]),
+        )
+
+    def test_connected_system_links_add(
+        self, openapi: OpenAPI, connected_system_status_payload: dict
+    ):
+        request = MockRequest(
+            host_url=HOST_URL,
+            method="POST",
+            path=f"{PREFIX}/messages/{MESSAGE_ID}/connected_system_links",
+            headers={
+                "Authorization": "Bearer test-token",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps(
+                {
+                    "external_uuid": connected_system_status_payload["external_uuid"],
+                    "links": [{"url": "https://odoo.example.com/odoo/contacts/7", "kind": "related"}],
+                }
+            ).encode(),
+        )
+        openapi.validate_request(request)
+        openapi.validate_response(
+            request, _json_response(connected_system_status_payload, status=200)
+        )
+
+    def test_connected_system_links_remove(
+        self, openapi: OpenAPI, connected_system_status_payload: dict
+    ):
+        request = MockRequest(
+            host_url=HOST_URL,
+            method="POST",
+            path=f"{PREFIX}/messages/{MESSAGE_ID}/connected_system_links/remove",
+            headers={
+                "Authorization": "Bearer test-token",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps(
+                {
+                    "external_uuid": connected_system_status_payload["external_uuid"],
+                    "paths": ["/odoo/invoices/42"],
+                }
+            ).encode(),
+        )
+        openapi.validate_request(request)
+        openapi.validate_response(request, MockResponse(data=b"", status_code=204))
 
     def test_error_body(self, openapi: OpenAPI, error_payload: dict):
         openapi.validate_response(

@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 import requests
 import responses
-from conftest import BASE_URL, CONNECTED_SYSTEM_ID, MESSAGE_ID, TENANT_ID, TOKEN
+from conftest import BASE_URL, CONNECTED_SYSTEM_ID, EXTERNAL_UUID, MESSAGE_ID, TENANT_ID, TOKEN
 
 from email_bridge_client import (
     ApiError,
     AuthenticationError,
-    Backlink,
+    RecordLink,
     ForbiddenError,
     IngestionClient,
     NotFoundError,
@@ -186,73 +186,111 @@ class TestDiscovery:
             fetch_client_config(BASE_URL)
 
 
-class TestConsumerStatus:
+class TestConnectedSystemStatus:
     @responses.activate
-    def test_report_status_posts_expected_body(
-        self, client: IngestionClient, consumer_status_payload: dict
+    def test_report_imported_posts_full_state(
+        self, client: IngestionClient, connected_system_status_payload: dict
     ):
-        rsp = responses.post(f"{MSG_URL}/consumer_status", json=consumer_status_payload, status=201)
-        cs = client.report_status(MESSAGE_ID, "imported", consumer_name="odoo-prod")
-        assert cs.status == "imported"
+        rsp = responses.post(
+            f"{MSG_URL}/connected_system_status",
+            json=connected_system_status_payload,
+            status=201,
+        )
+        cs = client.report_imported(
+            MESSAGE_ID,
+            EXTERNAL_UUID,
+            links=[
+                RecordLink(
+                    url="https://odoo.example.com/odoo/invoices/42",
+                    kind="created",
+                    title="Invoice INV/2026/0042",
+                ),
+            ],
+        )
+        assert cs.status == "imported" and cs.connected_system_name == "Odoo Prod"
         assert rsp.calls[0].request.headers["Content-Type"] == "application/json"
         import json
 
         assert json.loads(rsp.calls[0].request.body) == {
-            "consumer_name": "odoo-prod",
-            "consumer_type": "odoo-email-bridge",
+            "external_uuid": EXTERNAL_UUID,
             "status": "imported",
+            "links": [
+                {
+                    "url": "https://odoo.example.com/odoo/invoices/42",
+                    "kind": "created",
+                    "title": "Invoice INV/2026/0042",
+                }
+            ],
         }
 
     @responses.activate
-    def test_report_status_posts_backlinks(
-        self, client: IngestionClient, consumer_status_payload: dict
+    def test_report_imported_allows_empty_links(
+        self, client: IngestionClient, connected_system_status_payload: dict
     ):
-        rsp = responses.post(f"{MSG_URL}/consumer_status", json=consumer_status_payload, status=201)
-        cs = client.report_status(
-            MESSAGE_ID,
-            "related",
-            consumer_name="odoo-prod",
-            backlinks=[
-                Backlink(url="https://odoo.example.com/odoo/invoices/42", status="related"),
-            ],
+        rsp = responses.post(
+            f"{MSG_URL}/connected_system_status",
+            json=connected_system_status_payload,
+            status=201,
         )
-        assert cs.backlinks
+        client.report_imported(MESSAGE_ID, EXTERNAL_UUID)
         import json
 
         assert json.loads(rsp.calls[0].request.body) == {
-            "consumer_name": "odoo-prod",
-            "consumer_type": "odoo-email-bridge",
-            "status": "related",
-            "backlinks": [
-                {"url": "https://odoo.example.com/odoo/invoices/42", "status": "related"},
-            ],
+            "external_uuid": EXTERNAL_UUID,
+            "status": "imported",
+            "links": [],
         }
 
-    def test_report_status_rejects_unknown_value(self, client: IngestionClient):
-        with pytest.raises(ValueError):
-            client.report_status(MESSAGE_ID, "pending", consumer_name="odoo-prod")
-
-    def test_report_status_rejects_bad_backlink(self, client: IngestionClient):
-        with pytest.raises(ValueError, match=r"backlinks\[0\]: url"):
-            client.report_status(
-                MESSAGE_ID,
-                "imported",
-                consumer_name="odoo-prod",
-                backlinks=[Backlink(url="", status="imported")],
+    def test_link_validation(self, client: IngestionClient):
+        with pytest.raises(ValueError, match=r"links\[0\]: url"):
+            client.report_imported(
+                MESSAGE_ID, EXTERNAL_UUID, links=[RecordLink(url="", kind="created")]
             )
-        with pytest.raises(ValueError, match=r"backlinks\[0\]: status"):
-            client.report_status(
-                MESSAGE_ID,
-                "imported",
-                consumer_name="odoo-prod",
-                backlinks=[Backlink(url="https://x/1", status="failed")],
+        with pytest.raises(ValueError, match=r"links\[0\]: kind"):
+            client.add_links(
+                MESSAGE_ID, EXTERNAL_UUID, links=[RecordLink(url="https://x/1", kind="imported")]
             )
 
     @responses.activate
-    def test_list_consumer_status(self, client: IngestionClient, consumer_status_payload: dict):
-        responses.get(f"{MSG_URL}/consumer_status", json=[consumer_status_payload])
-        items = client.list_consumer_status(MESSAGE_ID)
-        assert len(items) == 1 and items[0].consumer_name == "odoo-prod"
+    def test_list_status(self, client: IngestionClient, connected_system_status_payload: dict):
+        responses.get(f"{MSG_URL}/connected_system_status", json=[connected_system_status_payload])
+        items = client.list_status(MESSAGE_ID)
+        assert len(items) == 1 and items[0].external_uuid == EXTERNAL_UUID
+        assert items[0].links[0].path == "/odoo/invoices/42"
+
+    @responses.activate
+    def test_add_links_posts_expected_body(
+        self, client: IngestionClient, connected_system_status_payload: dict
+    ):
+        rsp = responses.post(
+            f"{MSG_URL}/connected_system_links",
+            json=connected_system_status_payload,
+            status=200,
+        )
+        cs = client.add_links(
+            MESSAGE_ID,
+            EXTERNAL_UUID,
+            links=[RecordLink(url="https://odoo.example.com/odoo/contacts/7", kind="related")],
+        )
+        assert cs.links
+        import json
+
+        assert json.loads(rsp.calls[0].request.body) == {
+            "external_uuid": EXTERNAL_UUID,
+            "links": [{"url": "https://odoo.example.com/odoo/contacts/7", "kind": "related"}],
+        }
+
+    @responses.activate
+    def test_remove_links_posts_paths(self, client: IngestionClient):
+        rsp = responses.post(f"{MSG_URL}/connected_system_links/remove", status=204)
+        result = client.remove_links(MESSAGE_ID, EXTERNAL_UUID, ["/odoo/invoices/42"])
+        assert result is None
+        import json
+
+        assert json.loads(rsp.calls[0].request.body) == {
+            "external_uuid": EXTERNAL_UUID,
+            "paths": ["/odoo/invoices/42"],
+        }
 
 
 class TestTenants:

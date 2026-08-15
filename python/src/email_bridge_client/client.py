@@ -9,6 +9,7 @@ binaries, and reports the import outcome back.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from email.message import Message
 from typing import Any
@@ -27,17 +28,16 @@ from .exceptions import (
     TransportError,
 )
 from .models import (
-    BACKLINK_STATUS_VALUES,
-    CONSUMER_STATUS_VALUES,
+    LINK_KIND_VALUES,
     Attachment,
     AttachmentContent,
-    Backlink,
     ClientConfig,
     ConnectedSystem,
-    ConsumerStatus,
+    ConnectedSystemStatus,
     MessageDetail,
     MessageSummary,
     ParsedDocument,
+    RecordLink,
     TenantMasterData,
 )
 
@@ -49,8 +49,8 @@ DEFAULT_TIMEOUT = 10.0
 class RetryConfig:
     """Automatic retry policy for idempotent GET requests.
 
-    POSTs (``report_status``) are never retried automatically — they create
-    append-only audit rows, so the caller decides about re-submission.
+    POSTs (``report_imported``, ``add_links``, ``remove_links``) are never
+    retried automatically — the caller decides about re-submission.
     """
 
     attempts: int = 3
@@ -189,52 +189,92 @@ class IngestionClient:
             mime_type=resp.headers.get("Content-Type"),
         )
 
-    # ── consumer status ───────────────────────────────────────────────────
+    # ── connected system status ───────────────────────────────────────────
 
-    def report_status(
+    @staticmethod
+    def _validated_links(links: Iterable[RecordLink]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for i, link in enumerate(links):
+            if not link.url:
+                raise ValueError(f"links[{i}]: url must be non-empty")
+            if link.kind not in LINK_KIND_VALUES:
+                raise ValueError(
+                    f"links[{i}]: kind must be one of {LINK_KIND_VALUES}, got {link.kind!r}"
+                )
+            out.append(link.to_dict())
+        return out
+
+    def report_imported(
         self,
         message_id: str,
-        status: str,
-        *,
-        consumer_name: str,
-        consumer_type: str = "odoo-email-bridge",
-        backlinks: list[Backlink] | tuple[Backlink, ...] | None = None,
-    ) -> ConsumerStatus:
-        """``POST /messages/{messageId}/consumer_status`` — report the outcome.
+        external_uuid: str,
+        links: Iterable[RecordLink] = (),
+    ) -> ConnectedSystemStatus:
+        """``POST /messages/{messageId}/connected_system_status`` — report
+        that this connected system processed the message.
 
-        ``status`` must be one of ``imported``, ``failed``, ``skipped``,
-        ``related``. ``backlinks`` optionally points to the imported or
-        related records in the external system.
-        Not retried automatically (append-only audit log).
+        Full-state semantics: an existing report of the same system and ALL
+        of its links are replaced by this call. ``links`` may be empty
+        (processing without record creation). Link URLs must be absolute and
+        match the system's registered ``base_web_url``. Not retried
+        automatically.
         """
-        if status not in CONSUMER_STATUS_VALUES:
-            raise ValueError(f"status must be one of {CONSUMER_STATUS_VALUES}, got {status!r}")
         body: dict[str, Any] = {
-            "consumer_name": consumer_name,
-            "consumer_type": consumer_type,
-            "status": status,
+            "external_uuid": external_uuid,
+            "status": "imported",
+            "links": self._validated_links(links),
         }
-        if backlinks is not None:
-            for i, b in enumerate(backlinks):
-                if not b.url:
-                    raise ValueError(f"backlinks[{i}]: url must be non-empty")
-                if b.status not in BACKLINK_STATUS_VALUES:
-                    raise ValueError(
-                        f"backlinks[{i}]: status must be one of "
-                        f"{BACKLINK_STATUS_VALUES}, got {b.status!r}"
-                    )
-            body["backlinks"] = [b.to_dict() for b in backlinks]
         resp = self._request(
             "POST",
-            f"/messages/{_seg(message_id)}/consumer_status",
+            f"/messages/{_seg(message_id)}/connected_system_status",
             json=body,
         )
-        return ConsumerStatus.from_dict(resp.json())
+        return ConnectedSystemStatus.from_dict(resp.json())
 
-    def list_consumer_status(self, message_id: str) -> list[ConsumerStatus]:
-        """``GET /messages/{messageId}/consumer_status`` — prior reports."""
-        items = self._get_json(f"/messages/{_seg(message_id)}/consumer_status")
-        return [ConsumerStatus.from_dict(x) for x in items]
+    def list_status(self, message_id: str) -> list[ConnectedSystemStatus]:
+        """``GET /messages/{messageId}/connected_system_status`` — the
+        current report of every connected system (at most one each)."""
+        items = self._get_json(f"/messages/{_seg(message_id)}/connected_system_status")
+        return [ConnectedSystemStatus.from_dict(x) for x in items]
+
+    def add_links(
+        self,
+        message_id: str,
+        external_uuid: str,
+        links: Iterable[RecordLink],
+    ) -> ConnectedSystemStatus:
+        """``POST /messages/{messageId}/connected_system_links`` —
+        idempotently add record links.
+
+        Re-adding an existing path updates title and kind (last write wins).
+        A missing status report is created automatically, so this may be
+        called without a prior :meth:`report_imported`.
+        """
+        body: dict[str, Any] = {
+            "external_uuid": external_uuid,
+            "links": self._validated_links(links),
+        }
+        resp = self._request(
+            "POST",
+            f"/messages/{_seg(message_id)}/connected_system_links",
+            json=body,
+        )
+        return ConnectedSystemStatus.from_dict(resp.json())
+
+    def remove_links(
+        self,
+        message_id: str,
+        external_uuid: str,
+        paths: Iterable[str],
+    ) -> None:
+        """``POST /messages/{messageId}/connected_system_links/remove`` —
+        idempotently remove record links by their stored paths. Removing a
+        non-existent path is a no-op."""
+        self._request(
+            "POST",
+            f"/messages/{_seg(message_id)}/connected_system_links/remove",
+            json={"external_uuid": external_uuid, "paths": list(paths)},
+        )
 
     # ── tenants ───────────────────────────────────────────────────────────
 

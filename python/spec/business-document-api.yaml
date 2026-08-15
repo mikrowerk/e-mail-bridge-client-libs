@@ -14,7 +14,7 @@ info:
     Fields marked `writeOnly` (tenant `attachment_store_secrets`; mailbox
     credential `credentials`; action `auth_credentials`) are accepted on
     write but never returned in any response.
-  version: 0.17.0
+  version: 0.18.0
 
 servers:
   - url: localhost:8080/api/v1
@@ -30,11 +30,11 @@ tags:
     description: Mailbox management — requires role `tenant_admin` or `global_tenant_admin`
   - name: Messages
     description: Message access — requires role `tenant_user`
-  - name: ConsumerStatus
+  - name: ConnectedSystemStatus
     description: |
-      Append-only audit log of how external systems reported handling a
-      message — requires role `mailbox_user`. See
-      docs/specs/external-message-consumers-api.md.
+      Processing status and normalized record links reported by connected
+      systems — one current entry per (message, connected system); requires
+      role `mailbox_user`. See .features/.specs/connected_systems_refactoring.md.
   - name: Addresses
     description: Tenant address management — requires role `tenant_admin` or `global_tenant_admin`
   - name: MailboxCredentials
@@ -842,31 +842,34 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  # ── Consumer Status ─────────────────────────────────────────────────────────────
+  # ── Connected System Status ─────────────────────────────────────────────────────
+  # One current entry per (message, connected system) with normalized record
+  # links — see .features/.specs/connected_systems_refactoring.md.
 
-  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/consumer_status:
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/connected_system_status:
     parameters:
       - $ref: '#/components/parameters/TenantIdParam'
       - $ref: '#/components/parameters/MailboxIdParam'
       - $ref: '#/components/parameters/MessageIdParam'
 
     get:
-      tags: [ConsumerStatus]
-      operationId: listConsumerStatus
-      summary: List consumer status entries for a message
+      tags: [ConnectedSystemStatus]
+      operationId: listConnectedSystemStatus
+      summary: List connected system status entries for a message
       description: |
-        Append-only audit log of how external systems reported handling this
-        message, oldest first. There is no per-entry GET/PUT/DELETE — entries
-        are never mutated after creation.
+        At most one entry per registered connected system. Unpaginated; a hard
+        server-side row limit (1000) acts as a safety net. Each link carries
+        the stored path and the absolute URL composed from the system's
+        current base_web_url.
       responses:
         '200':
-          description: List of consumer status entries
+          description: List of connected system status entries
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ConsumerStatusResponse'
+                  $ref: '#/components/schemas/ConnectedSystemStatusResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -876,13 +879,16 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
     post:
-      tags: [ConsumerStatus]
-      operationId: createConsumerStatus
-      summary: Record a consumer status entry for a message
+      tags: [ConnectedSystemStatus]
+      operationId: reportConnectedSystemStatus
+      summary: Report the processing status of a connected system
       description: |
-        `consumer_name` and `consumer_type` are free text supplied by the
-        client. `mailbox_id` and `created_by_user_id` are always derived
-        server-side, never taken from the request.
+        Full-state semantics: replaces an existing entry of the same
+        (message, connected system) and ALL of its links with the posted
+        state. `links` may be empty (processing without record creation).
+        Link URLs must be absolute and match the system's registered
+        base_web_url (mismatch → 400); only the relative path is stored.
+        `mailbox_id` and `created_by_user_id` are derived server-side.
       security:
         - BearerAuth: []
       requestBody:
@@ -890,14 +896,90 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ConsumerStatusCreate'
+              $ref: '#/components/schemas/ConnectedSystemStatusReport'
       responses:
         '201':
-          description: Created consumer status entry
+          description: Stored connected system status entry
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConsumerStatusResponse'
+                $ref: '#/components/schemas/ConnectedSystemStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/connected_system_links:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+    post:
+      tags: [ConnectedSystemStatus]
+      operationId: addConnectedSystemLinks
+      summary: Idempotently add record links for a connected system
+      description: |
+        Upserts links by path: re-posting an existing path updates title and
+        kind (last write wins). If no status entry exists yet for the
+        (message, connected system) pair, one is created automatically with
+        status `imported`. At most 32 links per pair (exceeding → 400).
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectedSystemLinksAdd'
+      responses:
+        '200':
+          description: Resulting connected system status entry incl. links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectedSystemStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/mailboxes/{mailboxId}/messages/{messageId}/connected_system_links/remove:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - $ref: '#/components/parameters/MailboxIdParam'
+      - $ref: '#/components/parameters/MessageIdParam'
+    post:
+      tags: [ConnectedSystemStatus]
+      operationId: removeConnectedSystemLinks
+      summary: Idempotently remove record links of a connected system
+      description: |
+        Deletes the given paths for the (message, connected system) pair.
+        Removing a non-existent path — or removing from a pair without any
+        status entry — is a no-op. Deliberately a POST (not DELETE with a
+        request body) for toolchain compatibility.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectedSystemLinksRemove'
+      responses:
+        '204':
+          description: Links removed (or already absent)
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -911,7 +993,7 @@ paths:
 
   # ── Messages (simplified) ────────────────────────────────────────────────────────
   # Mirrors every operation in the tenant/mailbox-scoped Messages and
-  # ConsumerStatus sections above, addressed by messageId alone. The caller
+  # ConnectedSystemStatus sections above, addressed by messageId alone. The caller
   # must still hold a grant for the message's actual tenant and mailbox —
   # these are resolved server-side (see MessageOwnership in
   # docs/plans/external-message-consumers-api.md), not taken from the path.
@@ -1220,27 +1302,26 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /messages/{messageId}/consumer_status:
+  /messages/{messageId}/connected_system_status:
     parameters:
       - $ref: '#/components/parameters/MessageIdParam'
 
     get:
-      tags: [ConsumerStatus]
-      operationId: listConsumerStatusSimplified
-      summary: List consumer status entries for a message (simplified path)
+      tags: [ConnectedSystemStatus]
+      operationId: listConnectedSystemStatusSimplified
+      summary: List connected system status entries for a message (simplified path)
       description: |
-        Append-only audit log of how external systems reported handling this
-        message, oldest first. There is no per-entry GET/PUT/DELETE — entries
-        are never mutated after creation.
+        At most one entry per registered connected system. Unpaginated; a hard
+        server-side row limit (1000) acts as a safety net.
       responses:
         '200':
-          description: List of consumer status entries
+          description: List of connected system status entries
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ConsumerStatusResponse'
+                  $ref: '#/components/schemas/ConnectedSystemStatusResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1250,13 +1331,13 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
     post:
-      tags: [ConsumerStatus]
-      operationId: createConsumerStatusSimplified
-      summary: Record a consumer status entry for a message (simplified path)
+      tags: [ConnectedSystemStatus]
+      operationId: reportConnectedSystemStatusSimplified
+      summary: Report the processing status of a connected system (simplified path)
       description: |
-        `consumer_name` and `consumer_type` are free text supplied by the
-        client. `mailbox_id` and `created_by_user_id` are always derived
-        server-side, never taken from the request.
+        Full-state semantics: replaces an existing entry of the same
+        (message, connected system) and ALL of its links with the posted
+        state. See reportConnectedSystemStatus.
       security:
         - BearerAuth: []
       requestBody:
@@ -1264,14 +1345,82 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ConsumerStatusCreate'
+              $ref: '#/components/schemas/ConnectedSystemStatusReport'
       responses:
         '201':
-          description: Created consumer status entry
+          description: Stored connected system status entry
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConsumerStatusResponse'
+                $ref: '#/components/schemas/ConnectedSystemStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/connected_system_links:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+    post:
+      tags: [ConnectedSystemStatus]
+      operationId: addConnectedSystemLinksSimplified
+      summary: Idempotently add record links for a connected system (simplified path)
+      description: |
+        Upserts links by path (last write wins for title/kind); creates the
+        status entry automatically when missing. See addConnectedSystemLinks.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectedSystemLinksAdd'
+      responses:
+        '200':
+          description: Resulting connected system status entry incl. links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectedSystemStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/{messageId}/connected_system_links/remove:
+    parameters:
+      - $ref: '#/components/parameters/MessageIdParam'
+    post:
+      tags: [ConnectedSystemStatus]
+      operationId: removeConnectedSystemLinksSimplified
+      summary: Idempotently remove record links of a connected system (simplified path)
+      description: |
+        Deletes the given paths; missing paths are a no-op. See
+        removeConnectedSystemLinks.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectedSystemLinksRemove'
+      responses:
+        '204':
+          description: Links removed (or already absent)
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1981,13 +2130,15 @@ paths:
       operationId: deleteConnectedSystem
       summary: Delete a connected system
       description: |
-        Unrestricted in this release; consistency rules against reported
-        backlinks arrive with the backlink refactoring follow-up spec.
+        A system that is still referenced by status entries, record links, or
+        actions cannot be deleted (409).
       security:
         - BearerAuth: []
       responses:
         '204':
           description: Deleted
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3433,58 +3584,105 @@ components:
           type: string
           format: date-time
 
-    # ── Consumer Status ───────────────────────────────────────────────────────────
-    # See docs/specs/external-message-consumers-api.md. Append-only audit log —
-    # no update/delete schemas exist since entries are never mutated.
+    # ── Connected System Status ───────────────────────────────────────────────────
+    # See .features/.specs/connected_systems_refactoring.md. One current entry
+    # per (message, connected system); links stored as normalized paths.
 
-    ConsumerStatusValue:
+    ConnectedSystemStatusValue:
       type: string
-      enum: [imported, failed, skipped, related]
+      enum: [imported]
       description: >-
-        Outcome an external consumer reports for a message. `related` means the
-        message was matched to an existing record in the external system rather
-        than imported as a new one.
+        The single valid status value: the message was processed by the
+        connected system. Failure cases are handled on the consumer side and
+        never reported to the bridge.
 
-    BacklinkStatus:
+    LinkKind:
       type: string
-      enum: [imported, related]
-      description: Whether the linked external record was created by the import or already existed.
+      enum: [created, related]
+      description: Whether the linked record was created by the import or already existed.
 
-    ConsumerStatusBacklink:
+    RecordLinkInput:
       type: object
-      required: [url, status]
+      required: [url, kind]
       properties:
         url:
           type: string
           minLength: 1
-          description: Hyperlink to the record in the external system.
+          description: >-
+            Absolute URL of the record. Must match the connected system's
+            registered base_web_url (scheme + host); only the relative path
+            is stored.
         title:
           type: string
           description: Optional human-readable link label.
-        status:
-          $ref: '#/components/schemas/BacklinkStatus'
+        kind:
+          $ref: '#/components/schemas/LinkKind'
 
-    ConsumerStatusCreate:
+    RecordLink:
       type: object
-      required: [consumer_name, consumer_type, status]
+      required: [path, url, title, kind]
       properties:
-        consumer_name:
+        path:
           type: string
-          description: Free-text identifier of the reporting consumer instance, supplied by the client.
-        consumer_type:
+          description: Stored path relative to the system's base_web_url (incl. query/fragment).
+        url:
           type: string
-          description: Free-text category of the reporting consumer, supplied by the client (e.g. "odoo-email-bridge").
-        status:
-          $ref: '#/components/schemas/ConsumerStatusValue'
-        backlinks:
-          type: array
-          description: Optional hyperlinks to the imported or related records in the external system.
-          items:
-            $ref: '#/components/schemas/ConsumerStatusBacklink'
+          description: Absolute URL composed from the system's current base_web_url at serve time.
+        title:
+          type: string
+          description: Human-readable link label; empty when none was supplied.
+        kind:
+          $ref: '#/components/schemas/LinkKind'
 
-    ConsumerStatusResponse:
+    ConnectedSystemStatusReport:
       type: object
-      required: [id, tenant_id, message_id, mailbox_id, consumer_name, consumer_type, status, backlinks, created_by_user_id, created_at]
+      required: [external_uuid, status]
+      properties:
+        external_uuid:
+          type: string
+          format: uuid
+          description: Identifies the reporting connected system (registered in the message's tenant).
+        status:
+          $ref: '#/components/schemas/ConnectedSystemStatusValue'
+        links:
+          type: array
+          maxItems: 32
+          description: >-
+            Full state of the record links — an existing entry and ALL of its
+            links are replaced. May be empty or absent (no records).
+          items:
+            $ref: '#/components/schemas/RecordLinkInput'
+
+    ConnectedSystemLinksAdd:
+      type: object
+      required: [external_uuid, links]
+      properties:
+        external_uuid:
+          type: string
+          format: uuid
+        links:
+          type: array
+          maxItems: 32
+          description: Links to upsert by path (last write wins for title/kind).
+          items:
+            $ref: '#/components/schemas/RecordLinkInput'
+
+    ConnectedSystemLinksRemove:
+      type: object
+      required: [external_uuid, paths]
+      properties:
+        external_uuid:
+          type: string
+          format: uuid
+        paths:
+          type: array
+          description: Stored paths to remove; missing paths are a no-op.
+          items:
+            type: string
+
+    ConnectedSystemStatusResponse:
+      type: object
+      required: [id, tenant_id, message_id, mailbox_id, connected_system_id, external_uuid, connected_system_name, status, links, created_by_user_id, created_at]
       properties:
         id:
           type: string
@@ -3499,17 +3697,24 @@ components:
           type: string
           format: uuid
           description: The message's mailbox, resolved server-side — always in sync with the referenced message.
-        consumer_name:
+        connected_system_id:
           type: string
-        consumer_type:
+          format: uuid
+          description: UUID7 primary key of the reporting connected system.
+        external_uuid:
           type: string
+          format: uuid
+          description: The connected system's externally supplied identifier.
+        connected_system_name:
+          type: string
+          description: Human-readable name of the connected system at serve time.
         status:
-          $ref: '#/components/schemas/ConsumerStatusValue'
-        backlinks:
+          $ref: '#/components/schemas/ConnectedSystemStatusValue'
+        links:
           type: array
-          description: Hyperlinks to the imported or related records in the external system; empty when none were reported.
+          description: Normalized record links; empty when none were reported.
           items:
-            $ref: '#/components/schemas/ConsumerStatusBacklink'
+            $ref: '#/components/schemas/RecordLink'
         created_by_user_id:
           type: string
           format: uuid
@@ -4167,6 +4372,12 @@ components:
             Always rejected as true on create (400) — a newly created action
             has never been validated. Activate via ActionUpdate after a
             successful POST .../validate.
+        connected_system_id:
+          type: string
+          format: uuid
+          description: |
+            Optional reference to the connected system this action delivers
+            to; must belong to the action's tenant. Omit for no relation.
 
     ActionUpdate:
       type: object
@@ -4191,6 +4402,13 @@ components:
             request resets validated to false first, so true together with
             any of those in one request is always rejected — validate again
             after the configuration change lands.
+        connected_system_id:
+          type: string
+          description: |
+            Optional reference (UUID) to the connected system this action
+            delivers to; must belong to the action's tenant. Send an empty
+            string to clear the relation; omit the field to keep it
+            unchanged (same convention as auth_method's empty value).
 
     ActionResponse:
       type: object
@@ -4216,6 +4434,10 @@ components:
             Server-controlled. True once POST .../validate has succeeded for
             the current url/auth_method/auth_credentials; reset to false by
             any change to those fields.
+        connected_system_id:
+          type: string
+          format: uuid
+          description: Reference to the connected system this action delivers to; absent when no relation is set.
         created_at:
           type: string
           format: date-time

@@ -12,13 +12,11 @@ from .exceptions import (
     TransportError,
 )
 from .models import (
-    BACKLINK_STATUS_VALUES,
-    CONSUMER_STATUS_VALUES,
     DOCUMENT_SOURCE_VALUES,
+    LINK_KIND_VALUES,
     Attachment,
     AttachmentContent,
     AttachmentSummary,
-    Backlink,
     BusinessDocument,
     BusinessDocumentLine,
     BusinessParty,
@@ -28,12 +26,13 @@ from .models import (
     ClassificationEntry,
     ClientConfig,
     ConnectedSystem,
-    ConsumerStatus,
+    ConnectedSystemStatus,
     MessageDetail,
     MessageStageResult,
     MessageSummary,
     MonetaryTotal,
     ParsedDocument,
+    RecordLink,
     StageMetadataInfo,
     StageResultClassification,
     StageResultDocument,
@@ -43,23 +42,21 @@ from .models import (
 )
 from .webhook import is_test_mode, parse_webhook_payload, verify_bearer_token
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 #: API spec version this release was verified against (spec/business-document-api.yaml).
-SPEC_VERSION = "0.17.0"
+SPEC_VERSION = "0.18.0"
 
 __all__ = [
-    "BACKLINK_STATUS_VALUES",
-    "CONSUMER_STATUS_VALUES",
     "DEFAULT_TIMEOUT",
     "DOCUMENT_SOURCE_VALUES",
+    "LINK_KIND_VALUES",
     "SPEC_VERSION",
     "ApiError",
     "Attachment",
     "AttachmentContent",
     "AttachmentSummary",
     "AuthenticationError",
-    "Backlink",
     "BusinessDocument",
     "BusinessDocumentLine",
     "BusinessParty",
@@ -69,7 +66,7 @@ __all__ = [
     "ClassificationEntry",
     "ClientConfig",
     "ConnectedSystem",
-    "ConsumerStatus",
+    "ConnectedSystemStatus",
     "ForbiddenError",
     "IngestionClient",
     "IngestionClientError",
@@ -80,6 +77,7 @@ __all__ = [
     "MonetaryTotal",
     "NotFoundError",
     "ParsedDocument",
+    "RecordLink",
     "RetryConfig",
     "ServerError",
     "StageMetadataInfo",
