@@ -33,6 +33,7 @@ from .models import (
     AttachmentContent,
     Backlink,
     ClientConfig,
+    ConnectedSystem,
     ConsumerStatus,
     MessageDetail,
     MessageSummary,
@@ -247,6 +248,88 @@ class IngestionClient:
         """
         items = self._get_json("/tenants/self")
         return [TenantMasterData.from_dict(x) for x in items]
+
+    # ── connected systems ─────────────────────────────────────────────────
+
+    def list_connected_systems(self, tenant_id: str) -> list[ConnectedSystem]:
+        """``GET /tenants/{tenantId}/connected_systems`` — ordered by name.
+
+        Requires role ``tenant_admin`` (own tenant) or ``global_tenant_admin``
+        and spec 0.17.0+ on the server.
+        """
+        items = self._get_json(f"/tenants/{_seg(tenant_id)}/connected_systems")
+        return [ConnectedSystem.from_dict(x) for x in items]
+
+    def create_connected_system(
+        self,
+        tenant_id: str,
+        *,
+        name: str,
+        external_uuid: str,
+        base_web_url: str,
+        description: str | None = None,
+    ) -> ConnectedSystem:
+        """``POST /tenants/{tenantId}/connected_systems`` — register a system.
+
+        ``external_uuid`` is supplied by the external system, must be unique
+        across all tenants of the bridge, and is immutable afterwards.
+        ``base_web_url`` must be scheme + host only (port allowed, no path);
+        the server validates DNS resolution and normalizes the value.
+        """
+        body: dict[str, Any] = {
+            "name": name,
+            "external_uuid": external_uuid,
+            "base_web_url": base_web_url,
+        }
+        if description is not None:
+            body["description"] = description
+        resp = self._request(
+            "POST", f"/tenants/{_seg(tenant_id)}/connected_systems", json=body
+        )
+        return ConnectedSystem.from_dict(resp.json())
+
+    def get_connected_system(self, tenant_id: str, connected_system_id: str) -> ConnectedSystem:
+        """``GET /tenants/{tenantId}/connected_systems/{connectedSystemId}``."""
+        return ConnectedSystem.from_dict(
+            self._get_json(
+                f"/tenants/{_seg(tenant_id)}/connected_systems/{_seg(connected_system_id)}"
+            )
+        )
+
+    def update_connected_system(
+        self,
+        tenant_id: str,
+        connected_system_id: str,
+        *,
+        name: str,
+        base_web_url: str,
+        description: str | None = None,
+        external_uuid: str | None = None,
+    ) -> ConnectedSystem:
+        """``PUT /tenants/{tenantId}/connected_systems/{connectedSystemId}``.
+
+        ``external_uuid`` may be echoed unchanged for round-trip safety; a
+        value different from the stored one is rejected with 400 — the field
+        is immutable.
+        """
+        body: dict[str, Any] = {"name": name, "base_web_url": base_web_url}
+        if description is not None:
+            body["description"] = description
+        if external_uuid is not None:
+            body["external_uuid"] = external_uuid
+        resp = self._request(
+            "PUT",
+            f"/tenants/{_seg(tenant_id)}/connected_systems/{_seg(connected_system_id)}",
+            json=body,
+        )
+        return ConnectedSystem.from_dict(resp.json())
+
+    def delete_connected_system(self, tenant_id: str, connected_system_id: str) -> None:
+        """``DELETE /tenants/{tenantId}/connected_systems/{connectedSystemId}``."""
+        self._request(
+            "DELETE",
+            f"/tenants/{_seg(tenant_id)}/connected_systems/{_seg(connected_system_id)}",
+        )
 
     # ── discovery ─────────────────────────────────────────────────────────
 

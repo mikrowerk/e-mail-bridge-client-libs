@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import requests
 import responses
-from conftest import BASE_URL, MESSAGE_ID, TOKEN
+from conftest import BASE_URL, CONNECTED_SYSTEM_ID, MESSAGE_ID, TENANT_ID, TOKEN
 
 from email_bridge_client import (
     ApiError,
@@ -18,6 +18,7 @@ from email_bridge_client import (
 )
 
 MSG_URL = f"{BASE_URL}/messages/{MESSAGE_ID}"
+CS_URL = f"{BASE_URL}/tenants/{TENANT_ID}/connected_systems"
 
 
 class TestRequestBasics:
@@ -268,3 +269,92 @@ class TestTenants:
     def test_list_own_tenants_empty(self, client: IngestionClient):
         responses.get(f"{BASE_URL}/tenants/self", json=[])
         assert client.list_own_tenants() == []
+
+
+class TestConnectedSystems:
+    @responses.activate
+    def test_list(self, client: IngestionClient, connected_system_payload: dict):
+        responses.get(f"{CS_URL}", json=[connected_system_payload])
+        items = client.list_connected_systems(TENANT_ID)
+        assert len(items) == 1 and items[0].name == "Odoo Prod"
+
+    @responses.activate
+    def test_create_posts_expected_body(
+        self, client: IngestionClient, connected_system_payload: dict
+    ):
+        rsp = responses.post(CS_URL, json=connected_system_payload, status=201)
+        cs = client.create_connected_system(
+            TENANT_ID,
+            name="Odoo Prod",
+            external_uuid=connected_system_payload["external_uuid"],
+            base_web_url="https://odoo.example.com",
+            description="Company ERP",
+        )
+        assert cs.id == connected_system_payload["id"]
+        import json
+
+        assert json.loads(rsp.calls[0].request.body) == {
+            "name": "Odoo Prod",
+            "external_uuid": connected_system_payload["external_uuid"],
+            "base_web_url": "https://odoo.example.com",
+            "description": "Company ERP",
+        }
+
+    @responses.activate
+    def test_create_omits_absent_description(
+        self, client: IngestionClient, connected_system_payload: dict
+    ):
+        rsp = responses.post(CS_URL, json=connected_system_payload, status=201)
+        client.create_connected_system(
+            TENANT_ID,
+            name="Odoo Prod",
+            external_uuid=connected_system_payload["external_uuid"],
+            base_web_url="https://odoo.example.com",
+        )
+        import json
+
+        assert "description" not in json.loads(rsp.calls[0].request.body)
+
+    @responses.activate
+    def test_get(self, client: IngestionClient, connected_system_payload: dict):
+        responses.get(f"{CS_URL}/{CONNECTED_SYSTEM_ID}", json=connected_system_payload)
+        cs = client.get_connected_system(TENANT_ID, CONNECTED_SYSTEM_ID)
+        assert cs.base_web_url == "https://odoo.example.com"
+
+    @responses.activate
+    def test_update_echoes_external_uuid(
+        self, client: IngestionClient, connected_system_payload: dict
+    ):
+        rsp = responses.put(f"{CS_URL}/{CONNECTED_SYSTEM_ID}", json=connected_system_payload)
+        client.update_connected_system(
+            TENANT_ID,
+            CONNECTED_SYSTEM_ID,
+            name="Odoo Prod",
+            base_web_url="https://odoo.example.com",
+            external_uuid=connected_system_payload["external_uuid"],
+        )
+        import json
+
+        body = json.loads(rsp.calls[0].request.body)
+        assert body["external_uuid"] == connected_system_payload["external_uuid"]
+
+    @responses.activate
+    def test_delete(self, client: IngestionClient):
+        responses.delete(f"{CS_URL}/{CONNECTED_SYSTEM_ID}", status=204)
+        client.delete_connected_system(TENANT_ID, CONNECTED_SYSTEM_ID)
+
+    @responses.activate
+    def test_conflict_raises_api_error(self, client: IngestionClient):
+        responses.post(
+            CS_URL,
+            json={"code": "ALREADY_EXISTS", "message": "external UUID already registered"},
+            status=409,
+        )
+        with pytest.raises(ApiError) as excinfo:
+            client.create_connected_system(
+                TENANT_ID,
+                name="Odoo Prod",
+                external_uuid="b7f0d1c2-4a5e-7f60-8123-456789abcdef",
+                base_web_url="https://odoo.example.com",
+            )
+        assert excinfo.value.status_code == 409

@@ -854,3 +854,36 @@ class TenantMasterData:
             active=d["active"],
             address=TenantAddress.from_dict(addr) if addr is not None else None,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectedSystem:
+    """Registered external system of a tenant (spec 0.17.0:
+    ConnectedSystemResponse, ``/tenants/{tenantId}/connected_systems``).
+
+    ``external_uuid`` is supplied by the external system, globally unique,
+    and immutable after creation; ``base_web_url`` is the server-normalized
+    base URL (scheme + host, optional port) used to resolve backlinks.
+    """
+
+    id: str
+    tenant_id: str
+    external_uuid: str
+    name: str
+    description: str
+    base_web_url: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> ConnectedSystem:
+        return cls(
+            id=d["id"],
+            tenant_id=d["tenant_id"],
+            external_uuid=d["external_uuid"],
+            name=d["name"],
+            description=d.get("description", ""),
+            base_web_url=d["base_web_url"],
+            created_at=_parse_datetime(d.get("created_at")),
+            updated_at=_parse_datetime(d.get("updated_at")),
+        )

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import BASE_URL, MESSAGE_ID
+from conftest import BASE_URL, MESSAGE_ID, TENANT_ID
 from openapi_core import OpenAPI
 from openapi_core.testing import MockRequest, MockResponse
 
@@ -172,3 +172,58 @@ class TestResponseContracts:
 
     def test_tenants_self_empty_list(self, openapi: OpenAPI):
         openapi.validate_response(_get("/tenants/self"), _json_response([]))
+
+
+class TestConnectedSystemContracts:
+    def test_connected_systems_list(self, openapi: OpenAPI, connected_system_payload: dict):
+        openapi.validate_response(
+            _get(f"/tenants/{TENANT_ID}/connected_systems"),
+            _json_response([connected_system_payload]),
+        )
+
+    def test_connected_system_create(self, openapi: OpenAPI, connected_system_payload: dict):
+        request = MockRequest(
+            host_url=HOST_URL,
+            method="POST",
+            path=f"{PREFIX}/tenants/{TENANT_ID}/connected_systems",
+            headers={
+                "Authorization": "Bearer test-token",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps(
+                {
+                    "name": "Odoo Prod",
+                    "external_uuid": connected_system_payload["external_uuid"],
+                    "base_web_url": "https://odoo.example.com",
+                    "description": "Company ERP",
+                }
+            ).encode(),
+        )
+        openapi.validate_request(request)
+        openapi.validate_response(request, _json_response(connected_system_payload, status=201))
+
+    def test_connected_system_update(self, openapi: OpenAPI, connected_system_payload: dict):
+        request = MockRequest(
+            host_url=HOST_URL,
+            method="PUT",
+            path=f"{PREFIX}/tenants/{TENANT_ID}/connected_systems/{connected_system_payload['id']}",
+            headers={
+                "Authorization": "Bearer test-token",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps(
+                {
+                    "name": "Odoo Prod",
+                    "base_web_url": "https://odoo.example.com",
+                    "external_uuid": connected_system_payload["external_uuid"],
+                }
+            ).encode(),
+        )
+        openapi.validate_request(request)
+        openapi.validate_response(request, _json_response(connected_system_payload))
+
+    def test_connected_system_get(self, openapi: OpenAPI, connected_system_payload: dict):
+        openapi.validate_response(
+            _get(f"/tenants/{TENANT_ID}/connected_systems/{connected_system_payload['id']}"),
+            _json_response(connected_system_payload),
+        )

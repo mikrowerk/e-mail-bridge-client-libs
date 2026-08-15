@@ -95,6 +95,25 @@ if message.is_thread:
                              backlinks=[...])     # link to the record of the thread root
 ```
 
+### Managing connected systems (tenant admin)
+
+Connected systems normalize the base web URLs under which backlinks are
+resolved (spec 0.17.0+, role `tenant_admin` or `global_tenant_admin`). The
+`external_uuid` is supplied by the external system, is unique across all
+tenants of the bridge, and cannot be changed after registration:
+
+```python
+cs = client.create_connected_system(
+    tenant_id,
+    name="Odoo Prod",
+    external_uuid=my_system_uuid,
+    base_web_url="https://odoo.example.com",   # scheme + host only, DNS-validated
+)
+systems = client.list_connected_systems(tenant_id)
+client.update_connected_system(tenant_id, cs.id, name="Odoo", base_web_url=cs.base_web_url)
+client.delete_connected_system(tenant_id, cs.id)
+```
+
 ### Discovering the OAuth client configuration
 
 The server publishes the values needed to obtain API tokens (token endpoint,

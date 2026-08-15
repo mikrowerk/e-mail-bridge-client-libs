@@ -6,6 +6,7 @@ from decimal import Decimal
 from email_bridge_client import (
     Backlink,
     ClientConfig,
+    ConnectedSystem,
     ConsumerStatus,
     MessageDetail,
     MessageSummary,
@@ -278,3 +279,27 @@ class TestTenantMasterData:
         payload = {**tenant_master_data_payload, "future_field": 42}
         t = TenantMasterData.from_dict(payload)
         assert t.name == "Gammadata Systeme und Software GmbH"
+
+
+class TestConnectedSystem:
+    def test_from_dict_full(self, connected_system_payload: dict):
+        cs = ConnectedSystem.from_dict(connected_system_payload)
+        assert cs.id == connected_system_payload["id"]
+        assert cs.tenant_id == connected_system_payload["tenant_id"]
+        assert cs.external_uuid == connected_system_payload["external_uuid"]
+        assert cs.name == "Odoo Prod"
+        assert cs.description == "Company ERP"
+        assert cs.base_web_url == "https://odoo.example.com"
+        assert cs.created_at is not None and cs.created_at.tzinfo is not None
+        assert cs.updated_at is not None
+
+    def test_from_dict_defaults(self, connected_system_payload: dict):
+        payload = {
+            k: v
+            for k, v in connected_system_payload.items()
+            if k not in ("description", "created_at", "updated_at")
+        }
+        cs = ConnectedSystem.from_dict(payload)
+        assert cs.description == ""
+        assert cs.created_at is None
+        assert cs.updated_at is None

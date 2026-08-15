@@ -249,3 +249,20 @@ def tenant_master_data_payload() -> dict:
             "updated_at": "2026-08-10T09:00:00Z",
         },
     }
+
+
+CONNECTED_SYSTEM_ID = "01890a5c-0000-7000-8000-00805f9b34fb"
+
+
+@pytest.fixture(scope="session")
+def connected_system_payload() -> dict:
+    return {
+        "id": CONNECTED_SYSTEM_ID,
+        "tenant_id": TENANT_ID,
+        "external_uuid": "b7f0d1c2-4a5e-7f60-8123-456789abcdef",
+        "name": "Odoo Prod",
+        "description": "Company ERP",
+        "base_web_url": "https://odoo.example.com",
+        "created_at": "2026-08-15T09:00:00Z",
+        "updated_at": "2026-08-15T09:30:00Z",
+    }

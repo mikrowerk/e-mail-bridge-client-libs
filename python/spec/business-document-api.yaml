@@ -14,7 +14,7 @@ info:
     Fields marked `writeOnly` (tenant `attachment_store_secrets`; mailbox
     credential `credentials`; action `auth_credentials`) are accepted on
     write but never returned in any response.
-  version: 0.16.0
+  version: 0.17.0
 
 servers:
   - url: localhost:8080/api/v1
@@ -41,6 +41,12 @@ tags:
     description: Mailbox credentials (IMAP, Outlook, Gmail) — requires role `tenant_admin` or `global_tenant_admin`
   - name: Actions
     description: Postprocessing actions (e.g. webhook notifications) and their mailbox links — requires role `tenant_admin` or `global_tenant_admin`
+  - name: ConnectedSystems
+    description: |
+      Per-tenant registry of connected external systems (webhook consumers
+      that report backlinks). Normalizes each system's base web URL —
+      requires role `tenant_admin` or `global_tenant_admin`. See
+      .features/.specs/connected_systems_managment.md.
   - name: Users
     description: Human user management — requires role `global_tenant_admin`
   - name: ServiceAccounts
@@ -1831,6 +1837,157 @@ paths:
       responses:
         '204':
           description: Unlinked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ── Connected Systems ────────────────────────────────────────────────────────
+
+  /tenants/{tenantId}/connected_systems:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+    get:
+      tags: [ConnectedSystems]
+      operationId: listConnectedSystems
+      summary: List connected systems for a tenant
+      description: Ordered by name.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of connected systems
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConnectedSystemResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [ConnectedSystems]
+      operationId: createConnectedSystem
+      summary: Register a connected system
+      description: |
+        `external_uuid` is supplied by the external system, must be unique
+        across ALL tenants, and is immutable after creation. `base_web_url`
+        must be scheme + host only (http or https, port allowed, no path);
+        it is normalized (lower-cased, trailing slash stripped) and its
+        hostname must resolve via DNS to a non-private address unless
+        allowlisted by the operator.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectedSystemCreate'
+      responses:
+        '201':
+          description: Registered connected system
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectedSystemResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tenants/{tenantId}/connected_systems/{connectedSystemId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdParam'
+      - name: connectedSystemId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: UUID7 primary key of the connected system (not its external_uuid)
+    get:
+      tags: [ConnectedSystems]
+      operationId: getConnectedSystem
+      summary: Get a connected system by ID
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Connected system
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectedSystemResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [ConnectedSystems]
+      operationId: updateConnectedSystem
+      summary: Update a connected system
+      description: |
+        Updates name, description, and base_web_url. `external_uuid` is
+        immutable — sending a value different from the stored one is
+        rejected with 400. `base_web_url` is re-validated on every update.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectedSystemUpdate'
+      responses:
+        '200':
+          description: Updated connected system
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectedSystemResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [ConnectedSystems]
+      operationId: deleteConnectedSystem
+      summary: Delete a connected system
+      description: |
+        Unrestricted in this release; consistency rules against reported
+        backlinks arrive with the backlink refactoring follow-up spec.
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4112,6 +4269,82 @@ components:
           items:
             type: string
             format: uuid
+
+    # ── Connected Systems ────────────────────────────────────────────────────────
+
+    ConnectedSystemCreate:
+      type: object
+      required: [external_uuid, name, base_web_url]
+      properties:
+        external_uuid:
+          type: string
+          format: uuid
+          description: |
+            Supplied by the external system. Unique across ALL tenants and
+            immutable after creation; identifies the system in posted
+            backlinks.
+        name:
+          type: string
+          minLength: 1
+          description: Human-readable system name, unique per tenant.
+        description:
+          type: string
+          description: Optional human-readable description.
+        base_web_url:
+          type: string
+          minLength: 1
+          description: |
+            Base URL of the external system — scheme + host only (http or
+            https, port allowed, no path/query/fragment). Normalized and
+            validated (DNS resolution, private addresses blocked unless
+            allowlisted) on every store.
+
+    ConnectedSystemUpdate:
+      type: object
+      required: [name, base_web_url]
+      properties:
+        external_uuid:
+          type: string
+          format: uuid
+          description: |
+            Optional echo of the stored value. Immutable — a value different
+            from the stored one is rejected with 400.
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        base_web_url:
+          type: string
+          minLength: 1
+          description: Re-validated and normalized exactly like on create.
+
+    ConnectedSystemResponse:
+      type: object
+      required: [id, tenant_id, external_uuid, name, description, base_web_url, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID7 primary key.
+        tenant_id:
+          type: string
+          format: uuid
+        external_uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        base_web_url:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
     # ── Roles ────────────────────────────────────────────────────────────────────
 
