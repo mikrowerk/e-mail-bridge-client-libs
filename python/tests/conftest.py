@@ -150,23 +150,33 @@ def parsed_document_payload(business_doc_data: dict) -> dict:
     }
 
 
+EXTERNAL_UUID = "b7f0d1c2-4a5e-7f60-8123-456789abcdef"
+
+
 @pytest.fixture(scope="session")
-def consumer_status_payload() -> dict:
+def connected_system_status_payload() -> dict:
     return {
         "id": "6c8f95a1-8e4b-4d59-9f3c-2b7f0e6a3003",
         "tenant_id": TENANT_ID,
         "message_id": MESSAGE_ID,
         "mailbox_id": MAILBOX_ID,
-        "consumer_name": "odoo-prod",
-        "consumer_type": "odoo-email-bridge",
+        "connected_system_id": "01890a5c-0000-7000-8000-00805f9b34fb",
+        "external_uuid": EXTERNAL_UUID,
+        "connected_system_name": "Odoo Prod",
         "status": "imported",
-        "backlinks": [
+        "links": [
             {
+                "path": "/odoo/invoices/42",
                 "url": "https://odoo.example.com/odoo/invoices/42",
                 "title": "Invoice INV/2026/0042",
-                "status": "imported",
+                "kind": "created",
             },
-            {"url": "https://odoo.example.com/odoo/contacts/7", "status": "related"},
+            {
+                "path": "/odoo/contacts/7",
+                "url": "https://odoo.example.com/odoo/contacts/7",
+                "title": "",
+                "kind": "related",
+            },
         ],
         "created_by_user_id": "9d1e4b6f-7a25-49c8-8d3b-5e0c7f2a1004",
         "created_at": "2026-07-27T10:20:00Z",
@@ -248,4 +258,21 @@ def tenant_master_data_payload() -> dict:
             "created_at": "2026-08-10T09:00:00Z",
             "updated_at": "2026-08-10T09:00:00Z",
         },
+    }
+
+
+CONNECTED_SYSTEM_ID = "01890a5c-0000-7000-8000-00805f9b34fb"
+
+
+@pytest.fixture(scope="session")
+def connected_system_payload() -> dict:
+    return {
+        "id": CONNECTED_SYSTEM_ID,
+        "tenant_id": TENANT_ID,
+        "external_uuid": "b7f0d1c2-4a5e-7f60-8123-456789abcdef",
+        "name": "Odoo Prod",
+        "description": "Company ERP",
+        "base_web_url": "https://odoo.example.com",
+        "created_at": "2026-08-15T09:00:00Z",
+        "updated_at": "2026-08-15T09:30:00Z",
     }

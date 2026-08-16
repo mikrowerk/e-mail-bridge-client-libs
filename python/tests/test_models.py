@@ -4,12 +4,13 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from email_bridge_client import (
-    Backlink,
     ClientConfig,
-    ConsumerStatus,
+    ConnectedSystem,
+    ConnectedSystemStatus,
     MessageDetail,
     MessageSummary,
     ParsedDocument,
+    RecordLink,
     TenantMasterData,
 )
 
@@ -182,36 +183,43 @@ class TestParsedDocument:
         assert p.data is None and p.attachment_index == -1
 
 
-class TestConsumerStatus:
-    def test_from_dict(self, consumer_status_payload: dict):
-        cs = ConsumerStatus.from_dict(consumer_status_payload)
+class TestConnectedSystemStatus:
+    def test_from_dict(self, connected_system_status_payload: dict):
+        cs = ConnectedSystemStatus.from_dict(connected_system_status_payload)
         assert cs.status == "imported"
-        assert cs.consumer_type == "odoo-email-bridge"
+        assert cs.connected_system_name == "Odoo Prod"
+        assert cs.external_uuid == connected_system_status_payload["external_uuid"]
         assert cs.created_at.tzinfo is not None
-        assert cs.backlinks == (
-            Backlink(
+        assert cs.links == (
+            RecordLink(
                 url="https://odoo.example.com/odoo/invoices/42",
-                status="imported",
+                kind="created",
                 title="Invoice INV/2026/0042",
+                path="/odoo/invoices/42",
             ),
-            Backlink(url="https://odoo.example.com/odoo/contacts/7", status="related"),
+            RecordLink(
+                url="https://odoo.example.com/odoo/contacts/7",
+                kind="related",
+                title=None,
+                path="/odoo/contacts/7",
+            ),
         )
 
-    def test_from_dict_without_backlinks(self, consumer_status_payload: dict):
-        payload = {k: v for k, v in consumer_status_payload.items() if k != "backlinks"}
-        cs = ConsumerStatus.from_dict(payload)
-        assert cs.backlinks == ()
+    def test_from_dict_without_links(self, connected_system_status_payload: dict):
+        payload = {k: v for k, v in connected_system_status_payload.items() if k != "links"}
+        cs = ConnectedSystemStatus.from_dict(payload)
+        assert cs.links == ()
 
 
-class TestBacklink:
-    def test_to_dict_omits_absent_title(self):
-        assert Backlink(url="https://x/1", status="related").to_dict() == {
+class TestRecordLink:
+    def test_to_dict_omits_absent_title_and_path(self):
+        assert RecordLink(url="https://x/1", kind="related").to_dict() == {
             "url": "https://x/1",
-            "status": "related",
+            "kind": "related",
         }
-        assert Backlink(url="https://x/1", status="imported", title="Rec").to_dict() == {
+        assert RecordLink(url="https://x/1", kind="created", title="Rec").to_dict() == {
             "url": "https://x/1",
-            "status": "imported",
+            "kind": "created",
             "title": "Rec",
         }
 
@@ -278,3 +286,27 @@ class TestTenantMasterData:
         payload = {**tenant_master_data_payload, "future_field": 42}
         t = TenantMasterData.from_dict(payload)
         assert t.name == "Gammadata Systeme und Software GmbH"
+
+
+class TestConnectedSystem:
+    def test_from_dict_full(self, connected_system_payload: dict):
+        cs = ConnectedSystem.from_dict(connected_system_payload)
+        assert cs.id == connected_system_payload["id"]
+        assert cs.tenant_id == connected_system_payload["tenant_id"]
+        assert cs.external_uuid == connected_system_payload["external_uuid"]
+        assert cs.name == "Odoo Prod"
+        assert cs.description == "Company ERP"
+        assert cs.base_web_url == "https://odoo.example.com"
+        assert cs.created_at is not None and cs.created_at.tzinfo is not None
+        assert cs.updated_at is not None
+
+    def test_from_dict_defaults(self, connected_system_payload: dict):
+        payload = {
+            k: v
+            for k, v in connected_system_payload.items()
+            if k not in ("description", "created_at", "updated_at")
+        }
+        cs = ConnectedSystem.from_dict(payload)
+        assert cs.description == ""
+        assert cs.created_at is None
+        assert cs.updated_at is None

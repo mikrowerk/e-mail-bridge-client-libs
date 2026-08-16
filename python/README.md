@@ -6,8 +6,8 @@ fetch the parsed e-mail and its attachments, report the import outcome.
 
 - Python ≥ 3.10, single runtime dependency: `requests`.
 - Covers the simplified `/messages/{messageId}` endpoint family plus
-  `consumer_status`; see `spec/business-document-api.yaml` (the vendored
-  OpenAPI spec this release is verified against — `SPEC_VERSION`).
+  `connected_system_status`; see `spec/business-document-api.yaml` (the
+  vendored OpenAPI spec this release is verified against — `SPEC_VERSION`).
 - Since spec 0.13.0 the `data` payload of JSON parsed-document records is the
   canonical **BusinessDocument** schema (EN 16931);
   `ParsedDocument.business_document()` returns the typed view with monetary
@@ -61,7 +61,7 @@ def handle_webhook(request):  # framework-agnostic sketch
 ### Fetching and reporting (async worker)
 
 ```python
-from email_bridge_client import IngestionClient
+from email_bridge_client import IngestionClient, RecordLink
 
 with IngestionClient("https://host/api/v1", token=PAT) as client:
     message = client.get_message(uuid)
@@ -72,8 +72,17 @@ with IngestionClient("https://host/api/v1", token=PAT) as client:
     for attachment in client.list_attachments(uuid):
         content = client.download_attachment(uuid, attachment.id)
         save(content.filename, content.content)
-    client.report_status(uuid, "imported", consumer_name="odoo-prod")
+    client.report_imported(uuid, MY_SYSTEM_UUID, links=[
+        RecordLink(url="https://odoo.example.com/odoo/invoices/42",
+                   title="Invoice INV/2026/0042", kind="created"),
+    ])
 ```
+
+`MY_SYSTEM_UUID` is the `external_uuid` this system is registered with in the
+bridge's connected-systems registry. A re-report replaces the previous entry
+and all of its links (full-state semantics); records connected later can be
+maintained with `client.add_links(...)` / `client.remove_links(...)` —
+both idempotent.
 
 `token` is a personal access token of a service account with role
 `mailbox_user`. All errors derive from `IngestionClientError`
@@ -91,8 +100,27 @@ if message.is_thread:
     members = client.list_thread(uuid)            # oldest first, all mailboxes of the tenant
     newest = members[-1]
     if message.id != newest.id:
-        client.report_status(uuid, "related", consumer_name="odoo-prod",
-                             backlinks=[...])     # link to the record of the thread root
+        client.report_imported(uuid, MY_SYSTEM_UUID,
+                               links=[RecordLink(url=..., kind="related")])
+```
+
+### Managing connected systems (tenant admin)
+
+Connected systems normalize the base web URLs under which backlinks are
+resolved (spec 0.17.0+, role `tenant_admin` or `global_tenant_admin`). The
+`external_uuid` is supplied by the external system, is unique across all
+tenants of the bridge, and cannot be changed after registration:
+
+```python
+cs = client.create_connected_system(
+    tenant_id,
+    name="Odoo Prod",
+    external_uuid=my_system_uuid,
+    base_web_url="https://odoo.example.com",   # scheme + host only, DNS-validated
+)
+systems = client.list_connected_systems(tenant_id)
+client.update_connected_system(tenant_id, cs.id, name="Odoo", base_web_url=cs.base_web_url)
+client.delete_connected_system(tenant_id, cs.id)
 ```
 
 ### Discovering the OAuth client configuration
