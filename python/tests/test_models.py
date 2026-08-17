@@ -203,6 +203,12 @@ class TestConnectedSystemStatus:
                 title=None,
                 path="/odoo/contacts/7",
             ),
+            RecordLink(
+                url="https://odoo.example.com/odoo/mail/7",
+                kind="imported_message",
+                title="Imported e-mail",
+                path="/odoo/mail/7",
+            ),
         )
 
     def test_from_dict_without_links(self, connected_system_status_payload: dict):

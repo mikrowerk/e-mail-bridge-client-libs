@@ -42,10 +42,10 @@ from .models import (
 )
 from .webhook import is_test_mode, parse_webhook_payload, verify_bearer_token
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 #: API spec version this release was verified against (spec/business-document-api.yaml).
-SPEC_VERSION = "0.18.0"
+SPEC_VERSION = "0.19.0"
 
 __all__ = [
     "DEFAULT_TIMEOUT",

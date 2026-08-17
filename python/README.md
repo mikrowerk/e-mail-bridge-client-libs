@@ -73,15 +73,20 @@ with IngestionClient("https://host/api/v1", token=PAT) as client:
         content = client.download_attachment(uuid, attachment.id)
         save(content.filename, content.content)
     client.report_imported(uuid, MY_SYSTEM_UUID, links=[
+        RecordLink(url="https://odoo.example.com/odoo/mail/1234",
+                   title=message.subject, kind="imported_message"),
         RecordLink(url="https://odoo.example.com/odoo/invoices/42",
                    title="Invoice INV/2026/0042", kind="created"),
     ])
 ```
 
 `MY_SYSTEM_UUID` is the `external_uuid` this system is registered with in the
-bridge's connected-systems registry. A re-report replaces the previous entry
-and all of its links (full-state semantics); records connected later can be
-maintained with `client.add_links(...)` / `client.remove_links(...)` —
+bridge's connected-systems registry. The `imported_message` link points to the
+record that IS the imported e-mail — the bridge renders it as
+"Open E-Mail in <system>"; post exactly one per message (re-posting one
+replaces it, even under a different path). A re-report replaces the previous
+entry and all of its links (full-state semantics); records connected later can
+be maintained with `client.add_links(...)` / `client.remove_links(...)` —
 both idempotent.
 
 `token` is a personal access token of a service account with role

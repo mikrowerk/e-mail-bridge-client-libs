@@ -694,8 +694,11 @@ class ParsedDocument:
 
 
 #: Link classification values (spec: LinkKind). ``created`` = record was
-#: created by the import; ``related`` = message was matched to an existing one.
-LINK_KIND_VALUES = ("created", "related")
+#: created by the import; ``related`` = message was matched to an existing
+#: one; ``imported_message`` = the record that IS the imported e-mail inside
+#: the connected system (at most one per message and system — re-posting one
+#: replaces it, even under a different path).
+LINK_KIND_VALUES = ("created", "related", "imported_message")
 
 
 @dataclass(frozen=True, slots=True)

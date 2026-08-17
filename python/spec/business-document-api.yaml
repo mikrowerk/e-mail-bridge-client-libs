@@ -14,7 +14,7 @@ info:
     Fields marked `writeOnly` (tenant `attachment_store_secrets`; mailbox
     credential `credentials`; action `auth_credentials`) are accepted on
     write but never returned in any response.
-  version: 0.18.0
+  version: 0.19.0
 
 servers:
   - url: localhost:8080/api/v1
@@ -926,7 +926,9 @@ paths:
       summary: Idempotently add record links for a connected system
       description: |
         Upserts links by path: re-posting an existing path updates title and
-        kind (last write wins). If no status entry exists yet for the
+        kind (last write wins). An `imported_message` link additionally
+        replaces an existing imported_message link of the pair even when the
+        path differs (upsert by kind). If no status entry exists yet for the
         (message, connected system) pair, one is created automatically with
         status `imported`. At most 32 links per pair (exceeding → 400).
       security:
@@ -1372,8 +1374,10 @@ paths:
       operationId: addConnectedSystemLinksSimplified
       summary: Idempotently add record links for a connected system (simplified path)
       description: |
-        Upserts links by path (last write wins for title/kind); creates the
-        status entry automatically when missing. See addConnectedSystemLinks.
+        Upserts links by path (last write wins for title/kind); an
+        `imported_message` link replaces an existing one of the pair (upsert
+        by kind); creates the status entry automatically when missing. See
+        addConnectedSystemLinks.
       security:
         - BearerAuth: []
       requestBody:
@@ -3598,8 +3602,17 @@ components:
 
     LinkKind:
       type: string
-      enum: [created, related]
-      description: Whether the linked record was created by the import or already existed.
+      enum: [created, related, imported_message]
+      description: |
+        Classification of the linked record: `created` = business record
+        created by the import; `related` = existing business record the
+        message was matched to; `imported_message` = the record that IS the
+        imported e-mail inside the connected system. At most one
+        `imported_message` link exists per (message, connected system) — a
+        request containing more than one is rejected (400), and posting one
+        via the link-add endpoint REPLACES an existing imported_message link
+        of the pair even when the path differs. It counts against the
+        32-links-per-pair cap.
 
     RecordLinkInput:
       type: object

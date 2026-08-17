@@ -177,6 +177,12 @@ def connected_system_status_payload() -> dict:
                 "title": "",
                 "kind": "related",
             },
+            {
+                "path": "/odoo/mail/7",
+                "url": "https://odoo.example.com/odoo/mail/7",
+                "title": "Imported e-mail",
+                "kind": "imported_message",
+            },
         ],
         "created_by_user_id": "9d1e4b6f-7a25-49c8-8d3b-5e0c7f2a1004",
         "created_at": "2026-07-27T10:20:00Z",

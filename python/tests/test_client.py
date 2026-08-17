@@ -396,3 +396,39 @@ class TestConnectedSystems:
                 base_web_url="https://odoo.example.com",
             )
         assert excinfo.value.status_code == 409
+
+
+class TestImportedMessageLink:
+    @responses.activate
+    def test_report_imported_carries_imported_message_kind(
+        self, client: IngestionClient, connected_system_status_payload: dict
+    ):
+        rsp = responses.post(
+            f"{MSG_URL}/connected_system_status",
+            json=connected_system_status_payload,
+            status=201,
+        )
+        cs = client.report_imported(
+            MESSAGE_ID,
+            EXTERNAL_UUID,
+            links=[
+                RecordLink(
+                    url="https://odoo.example.com/odoo/mail/7",
+                    kind="imported_message",
+                    title="Imported e-mail",
+                ),
+            ],
+        )
+        assert any(link.kind == "imported_message" for link in cs.links)
+        import json
+
+        body = json.loads(rsp.calls[0].request.body)
+        assert body["links"][0]["kind"] == "imported_message"
+
+    def test_unknown_kind_still_rejected(self, client: IngestionClient):
+        with pytest.raises(ValueError, match=r"links\[0\]: kind"):
+            client.add_links(
+                MESSAGE_ID,
+                EXTERNAL_UUID,
+                links=[RecordLink(url="https://x/1", kind="mail")],
+            )
